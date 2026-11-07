@@ -1,6 +1,7 @@
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
+from async_fixture import wait_until
 
 from textual.widgets import Collapsible, Static
 from sos_tui.app import SosApp
@@ -129,6 +130,8 @@ class BtwUiTest(unittest.IsolatedAsyncioTestCase):
         await self.pilot.pause()
         viewport.scroll_home(animate=False, immediate=True)
         await self.branch()
+        await wait_until(self.pilot, lambda: principal.region.y == viewport.content_region.y,
+                         "first btw's deferred principal scroll")
         self.assertEqual(principal.region.y, viewport.content_region.y)
 
     async def test_follow_up_positions_its_user_at_top_and_main_response_does_not_steal_scroll(self):

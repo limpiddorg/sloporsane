@@ -30,6 +30,12 @@ runs:
         uv sync --project integrations/tui --group build --locked --python 3.12
       env:
         UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/build-ai/tui-venv
+    - name: Detect runner parallelism
+      shell: bash
+      run: |
+        jobs=$(build-ai/tui-venv/bin/python -c 'import os; print(os.cpu_count() or 1)')
+        echo "SOS_BUILD_JOBS=$jobs" >> "$GITHUB_ENV"
+        echo "Using $jobs workers for builds and tests"
     - name: Configure
       shell: bash
       run: |
@@ -41,14 +47,14 @@ runs:
           -DSOS_TUI_INSTALL_DIR="$GITHUB_WORKSPACE/build-ai/install/app"
     - name: Compile
       shell: bash
-      run: cmake --build build-ai --parallel 3 --target sosd agent-runtime-tests daemon-transport-tests daemon-session-tests session-fixture
+      run: cmake --build build-ai --parallel "$SOS_BUILD_JOBS" --target sosd agent-runtime-tests daemon-transport-tests daemon-session-tests session-fixture
     - name: Native tests
       shell: bash
-      run: ctest --test-dir build-ai --output-on-failure --parallel 3 -E '^TuiBundleTest\.'
+      run: ctest --test-dir build-ai --output-on-failure --parallel "$SOS_BUILD_JOBS" -E '^TuiBundleTest\.'
     - name: Textual and installer tests
       shell: bash
       run: |
-        build-ai/tui-venv/bin/python integrations/tui/run_tests.py -j 1
+        build-ai/tui-venv/bin/python integrations/tui/run_tests.py -j "$SOS_BUILD_JOBS"
         build-ai/tui-venv/bin/python -B scripts/test_installer.py build-ai/installer-tests
     - name: Build and smoke-test standalone archive
       shell: bash
@@ -57,7 +63,7 @@ runs:
           Darwin:arm64:macos-arm64|Linux:x86_64:linux-x86_64) ;;
           *) echo 'Runner does not match the release platform' >&2; exit 1 ;;
         esac
-        cmake --build build-ai --parallel 3 --target build-tui
+        cmake --build build-ai --parallel "$SOS_BUILD_JOBS" --target build-tui
         archive=(build-ai/tui/dist/sos-*.tar.gz)
         test "${#archive[@]}" -eq 1
         test -f "${archive[0]}"

@@ -1,6 +1,7 @@
 """Historical Objective Plan drawers at the end of Discussion turns."""
 import unittest
 from unittest.mock import AsyncMock, patch
+from async_fixture import wait_until
 
 from textual.widgets import Button, Collapsible
 
@@ -75,7 +76,17 @@ class ObjectiveDrawerTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(drawers[0].collapsed)
         self.assertNotIn("Third plan", drawers[0].query_one(ResponseMarkdown)._markdown)
         self.app.query_one(MessageInput).text = "Discussion draft"
-        await self.pilot.click(drawers[0].query_one(".objective-implement", Button))
+        button = drawers[0].query_one(".objective-implement", Button)
+        # The draft edit and Markdown both reflow before hit testing is reliable.
+        await self.pilot.pause()
+        button.scroll_visible(animate=False, immediate=True)
+        await self.pilot.pause()
+        await wait_until(self.pilot, lambda: self.app.screen.can_view_entire(button)
+                         and self.app.screen.get_widget_at(*button.region.offset)[0] is button,
+                         "historical plan's implementation button to be clickable")
+        self.assertTrue(await self.pilot.click(button))
+        await wait_until(self.pilot, lambda: self.app.client.send.called,
+                         "historical plan's implementation request")
         sent = self.app.client.send.call_args.args[0]
         self.assertEqual((sent["type"], sent["objectiveId"]), ("implementation.open", first["id"]))
         self.assertEqual(self.app.query_one(MessageInput).text, "Discussion draft")
