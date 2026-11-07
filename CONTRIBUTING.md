@@ -89,6 +89,10 @@ Pour la partager, envoyer l'archive. Le destinataire l'extrait et lance `sos/sos
 depuis un terminal, en conservant le dossier extrait complet.
 L'archive doit correspondre au système et à l'architecture du destinataire.
 Sur macOS, une distribution téléchargée non signée peut être bloquée par Gatekeeper.
+La CI sur `main`, les Releases en brouillon déclenchées par tag et le contrat du
+futur backend pour le template `scripts/install.sh.in` sont décrits dans
+[docs/distribution.md](docs/distribution.md). L'installateur public télécharge une
+archive distante ; il est distinct de l'installation locale CMake.
 
 La cible `install-tui`, incluse par défaut, installe cette distribution dans
 `$XDG_DATA_HOME/sos/app/` (ou `~/.local/share/sos/app/`) et crée le lien `sos` dans

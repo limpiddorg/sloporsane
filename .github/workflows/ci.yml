@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/build-ai/uv-cache
+  UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/build-ai/python
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos-arm64
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/build
+        with:
+          platform: ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sos-${{ matrix.platform }}
+          path: build-ai/release/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7

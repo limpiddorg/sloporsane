@@ -1,0 +1,73 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/build-ai/uv-cache
+  UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/build-ai/python
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos-arm64
+          - runner: ubuntu-24.04
+            platform: linux-x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate version tag
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: '[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]'
+      - uses: ./.github/actions/build
+        with:
+          platform: ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: build-ai/release/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+  draft:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: build-ai/release
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          test -f build-ai/release/sos-macos-arm64.tar.gz
+          test -f build-ai/release/sos-linux-x86_64.tar.gz
+          cp scripts/install.sh.in build-ai/release/install.sh.in
+          cp docs/distribution.md build-ai/release/distribution.md
+          (cd build-ai/release && sha256sum sos-*.tar.gz install.sh.in > SHA256SUMS)
+      - name: Create draft with all assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Refuse an existing release rather than replace published assets on a rerun.
+          gh release create "$TAG" build-ai/release/* --verify-tag --draft \
+            --title "$TAG" --generate-notes
