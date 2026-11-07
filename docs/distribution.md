@@ -74,6 +74,14 @@ scripts retain their old URL. Do not inject authentication secrets into public
 scripts; public installation requires publicly downloadable assets.
 
 The user runs the rendered script with Bash, for example through `curl ... | bash`.
+It first warns in English that the user's running SOS applications and daemon will
+be closed. An interactive Yes/No selector reads `/dev/tty`, with **No selected by
+default**. Enter on No cancels without writing or stopping processes; a missing
+terminal is an error, never implicit approval. Left/Right changes the selection.
+After successful download and extraction, confirmation permits SIGTERM for exact
+`sos` and `sosd` process names owned by the current user. If they do not stop within
+five seconds, installation fails without switching the launcher; no SIGKILL.
+Other users' processes and unrelated terminal programs are not targeted.
 The script detects its platform, downloads one archive and `SHA256SUMS`, requires
 HTTPS even across redirects and checks the archive hash before extraction.
 Base64 avoids shell syntax injection during substitution; it is not encryption.

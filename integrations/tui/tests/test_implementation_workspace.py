@@ -595,6 +595,7 @@ class ImplementationWorkspaceTest(unittest.IsolatedAsyncioTestCase):
         card = self.workspace.query_one(ImplementationProposalCard)
         self.assertEqual([str(b.label) for b in card.query(Button)], ["Accept", "Decline"])
         preview = card.query_one(".permission-preview")
+        await wait_until(self.pilot, lambda: preview.max_scroll_y > 0, "proposal Markdown layout")
         self.assertLessEqual(preview.size.height, 8)
         self.assertGreater(preview.max_scroll_y, 0)
         preview.scroll_end(animate=False, immediate=True)
@@ -2233,7 +2234,8 @@ class ImplementationWorkspaceTest(unittest.IsolatedAsyncioTestCase):
         question = {"role": "user", "content": [{"type": "text", "text": "Question"}]}
         answer = {"role": "assistant", "content": [{"type": "text", "text": "\n\n".join(f"Line {i}" for i in range(45))}]}
         await chat.show_records([question, answer], False)
-        await self.pilot.pause()
+        await wait_until(self.pilot, lambda: chat.max_scroll_y > 0 and chat.scroll_y == chat.max_scroll_y,
+                         "review Markdown layout and initial follow")
         self.assertGreater(chat.max_scroll_y, 0)
         self.assertTrue(chat.follow_tail)
         self.assertEqual(chat.scroll_y, chat.max_scroll_y)

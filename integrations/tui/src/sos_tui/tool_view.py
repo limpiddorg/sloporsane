@@ -521,7 +521,7 @@ class ReadView(Static):
         self.update(self.label_text())
 
     def render(self) -> Text:
-        return self.label_text(self.content_size.width)
+        return self.label_text(self.content_size.width or None)
 
     def on_resize(self) -> None:
         self.refresh()

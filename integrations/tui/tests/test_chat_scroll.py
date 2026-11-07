@@ -140,6 +140,7 @@ class ChatScrollTest(unittest.IsolatedAsyncioTestCase):
         y = user.region.y
         await self.accept(user)
         self.assertIs(list(self.app.query(UserMessage))[-1], user)
+        await wait_until(self.pilot, lambda: user.region.y == y, "accepted turn's stable reading position")
         self.assertEqual(user.region.y, y)
         self.assertEqual(len(self.app.query(UserMessage)), 3)
 
@@ -169,6 +170,7 @@ class ChatScrollTest(unittest.IsolatedAsyncioTestCase):
         self.viewport.scroll_end(animate=False, immediate=True)
         await self.pilot.pause()
         await self.reply()
+        await wait_until(self.pilot, lambda: self.viewport.is_vertical_scroll_end, "response's final follow scroll")
         self.assertTrue(self.viewport.is_vertical_scroll_end)
 
     async def test_activity_growth_does_not_follow_and_collapse_reduces_scroll_limit(self):

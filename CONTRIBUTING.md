@@ -1,5 +1,12 @@
 # Conventions de développement
 
+## Commits
+
+Utiliser `type(scope): description`, avec type et scope en minuscules et une
+description en anglais. Choisir le type selon l'intention : `fix`, `feature`,
+`tests`, `docs`, `build`, `ci`, `refactor` ou `chore`, par exemple
+`fix(tui): preserve reading position during markdown updates`.
+
 Les textes affichés par l'application (TUI, logs, erreurs et invites du daemon)
 sont écrits en anglais.
 

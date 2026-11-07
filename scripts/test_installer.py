@@ -3,6 +3,11 @@ import base64
 import hashlib
 import io
 import os
+import pty
+import select
+import signal
+import threading
+import time
 from pathlib import Path
 import subprocess
 import sys
@@ -38,6 +43,7 @@ done
 cp "$TEST_RELEASE/${url##*/}" "$output"
 ''')
         self.stub("base64", f'#!{sys.executable}\nimport base64,sys\nsys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read(), validate=True))\n')
+        self.stub("pgrep", '#!/bin/sh\nif [ "$4" = sos ] && [ -n "${TEST_SOS_PID:-}" ]; then echo "$TEST_SOS_PID"; else exit 1; fi\n')
         self.script = self.root / "install.sh"
         self.render()
         self.archive()
@@ -64,15 +70,78 @@ cp "$TEST_RELEASE/${url##*/}" "$output"
         (self.server / "SHA256SUMS").write_text(f"{digest}  {asset.name}\n")
         return digest
 
-    def run_installer(self, success=True):
-        result = subprocess.run(["/bin/bash", str(self.script)], env=self.env, cwd=self.root,
-                                text=True, capture_output=True)
-        self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+    def run_installer(self, success=True, decision=b"\x1b[C\r"):
+        pid, master = pty.fork()
+        if pid == 0:
+            os.chdir(self.root)
+            # Emulate curl | bash: the prompt must use /dev/tty, not stdin.
+            empty = os.open(os.devnull, os.O_RDONLY)
+            os.dup2(empty, 0)
+            os.execve("/bin/bash", ["bash", str(self.script)], self.env)
+        # Reap a shutdown-test child without forking while a reaper thread runs.
+        child = getattr(self, "process_to_reap", None)
+        reaper = threading.Thread(target=child.wait, daemon=True) if child is not None else None
+        if reaper is not None:
+            reaper.start()
+        output = bytearray()
+        answered = False
+        status = None
+        deadline = time.monotonic() + 15
+        try:
+            while time.monotonic() < deadline:
+                if select.select([master], [], [], 0.05)[0]:
+                    try:
+                        chunk = os.read(master, 65536)
+                    except OSError:
+                        chunk = b""
+                    if chunk:
+                        output.extend(chunk)
+                    if not answered and b"[No]  Yes" in output:
+                        os.write(master, decision)
+                        answered = True
+                done, status_value = os.waitpid(pid, os.WNOHANG)
+                if done:
+                    status = status_value
+                    break
+            self.assertIsNotNone(status, output.decode(errors="replace"))
+        finally:
+            if status is None:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+            os.close(master)
+            if reaper is not None:
+                reaper.join(timeout=2)
+        text = output.decode(errors="replace")
+        result = subprocess.CompletedProcess(["bash", str(self.script)], os.waitstatus_to_exitcode(status), text, text)
+        self.assertEqual(result.returncode == 0, success, text)
         return result
 
     @property
     def link(self):
         return self.home / ".local/bin/sos"
+
+    def test_no_is_default_and_does_not_write_or_stop_processes(self):
+        result = self.run_installer(decision=b"\r")
+        self.assertIn("[No]  Yes", result.stdout)
+        self.assertIn("Installation cancelled", result.stdout)
+        self.assertFalse(self.home.exists())
+
+    def test_yes_stops_running_sos_before_switching_launcher(self):
+        child = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: child.poll() is None and child.terminate())
+        self.process_to_reap = child
+        self.env["TEST_SOS_PID"] = str(child.pid)
+        self.run_installer()
+        self.assertEqual(child.returncode, -signal.SIGTERM)
+        self.assertTrue(self.link.is_file())
+
+    def test_requires_terminal_instead_of_silently_accepting(self):
+        result = subprocess.run(["/bin/bash", str(self.script)], env=self.env, cwd=self.root,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                start_new_session=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("interactive terminal", result.stderr)
+        self.assertFalse(self.home.exists())
 
     def test_install_repeat_update_and_spaces(self):
         self.run_installer()

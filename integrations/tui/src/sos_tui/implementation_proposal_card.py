@@ -19,6 +19,10 @@ class ImplementationProposalCard(PermissionCard):
         self.plan_proposal = False
         self.focus_pending = False
 
+    def on_resize(self):
+        if self.focus_pending:
+            self.call_after_refresh(self.reveal_choice)
+
     def on_markdown_table_of_contents_updated(self, event):
         if self.focus_pending:
             self.call_after_refresh(self.reveal_choice)

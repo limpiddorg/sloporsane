@@ -28,6 +28,28 @@ elif command -v sha256sum >/dev/null; then
 else
     fail "shasum or sha256sum is required."
 fi
+# Read from the controlling terminal, not stdin: stdin may contain curl's script.
+exec 3<>/dev/tty || fail "An interactive terminal is required to confirm installation."
+printf 'All running SOS applications and the SOS daemon for your user will be closed to install or update SOS.\nContinue? Use Left/Right to choose, then Enter.\n' >&3
+choice=no
+while true; do
+    if [[ "$choice" == no ]]; then printf '\r[No]  Yes  ' >&3; else printf '\r No  [Yes] ' >&3; fi
+    IFS= read -rsn1 key <&3 || fail "Confirmation was interrupted."
+    case "$key" in
+        '') break ;;
+        n|N) choice=no ;;
+        y|Y) choice=yes ;;
+        $'\033')
+            IFS= read -rsn2 -t 1 key <&3 || true
+            case "$key" in '[C'|'[D'|'[A'|'[B')
+                if [[ "$choice" == no ]]; then choice=yes; else choice=no; fi ;;
+            esac ;;
+    esac
+done
+printf '\n' >&3
+exec 3>&-
+if [[ "$choice" != yes ]]; then printf 'Installation cancelled.\n'; exit 0; fi
+command -v pgrep >/dev/null || fail "pgrep is required to stop running SOS processes."
 case "${XDG_DATA_HOME:-}" in
     /*) data_home=$XDG_DATA_HOME ;;
     *) data_home="$HOME/.local/share" ;;
@@ -75,6 +97,38 @@ if [[ ! -f "$destination/.complete" ]]; then
 fi
 [[ -x "$destination/sos/sos" ]] || fail "Installed launcher is missing."
 [[ ! -d "$bin_dir/sos" || -L "$bin_dir/sos" ]] || fail "Cannot replace a directory: $bin_dir/sos"
+# Stop only exact SOS process names owned by this user, never other users' sessions.
+# Downloads and extraction have succeeded before any running process is stopped.
+pids=()
+uid=$(id -u)
+for name in sos sosd; do
+    matches=$(pgrep -u "$uid" -x "$name") || {
+        status=$?
+        [[ "$status" -eq 1 ]] || fail "Could not enumerate running SOS processes."
+        matches=
+    }
+    for pid in $matches; do
+        [[ "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]] || fail "Invalid SOS process identifier."
+        pids+=("$pid")
+    done
+done
+if [[ "${#pids[@]}" -gt 0 ]]; then
+    printf 'Closing running SOS applications and daemon...\n'
+    for pid in "${pids[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null || fail "Could not stop SOS process $pid."
+        fi
+    done
+    for attempt in {1..50}; do
+        running=no
+        for pid in "${pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then running=yes; fi
+        done
+        [[ "$running" == yes ]] || break
+        sleep 0.1
+    done
+    [[ "$running" == no ]] || fail "SOS is still running. Close it manually and retry; the current launcher was not replaced."
+fi
 link=$(mktemp "$bin_dir/.sos.XXXXXX")
 rm "$link"
 ln -s "$destination/sos/sos" "$link"

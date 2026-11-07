@@ -174,8 +174,8 @@ class TurnActivity(Vertical):
     TurnActivity > .activity-separator { height: 1; margin: 0; color: $muted; }
     TurnActivity > .activity-content { height: auto; margin: 0 1 0 3; padding: 0 0 0 2; }
     TurnActivity > .manual-refusals { height: auto; margin: 0 1 0 3; padding: 0 2 0 2; }
-    TurnActivity > .refusals-heading, TurnActivity > .history-heading { height: 1; margin: 0 1 0 3; padding: 0 5 0 3; text-style: bold; }
-    TurnActivity > Rule.approval-separator.-horizontal { height: 1; margin: 0 0 0 6; color: $muted; }
+    TurnActivity > .refusals-heading, TurnActivity > .history-heading { height: 1; margin: 0 1 0 3; padding: 0 5 0 2; text-style: bold; }
+    TurnActivity > Rule.approval-separator.-horizontal { height: 1; margin: 0 0 0 5; color: $muted; }
     ActivityToggle, ActivityToggle:hover, ActivityToggle:focus {
         height: 1; margin: 0 1 0 3; padding: 0; color: $muted; background: $background;
         background-tint: transparent; tint: transparent; text-style: none; pointer: pointer;

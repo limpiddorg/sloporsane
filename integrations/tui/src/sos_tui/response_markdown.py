@@ -62,7 +62,7 @@ class ResponseMarkdown(Markdown):
     def update(self, markdown):
         from .stable_scroll import StableScroll
         viewport = next((parent for parent in self.ancestors if isinstance(parent, StableScroll)), None)
-        if viewport is not None:
+        if viewport is not None and self.is_mounted and self.region.height:
             viewport.retain_reading_position()
         return super().update(markdown)
 

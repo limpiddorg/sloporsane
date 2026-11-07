@@ -21,7 +21,7 @@ add_custom_command(
     COMMAND "${CMAKE_COMMAND}" -E chdir "${TUI_DIST_DIR}"
         "${CMAKE_COMMAND}" -E tar cfz "${TUI_ARCHIVE}" --format=gnutar sos
     DEPENDS sosd ${TUI_SOURCES} "${TUI_SOURCE_DIR}/pyproject.toml" "${TUI_SOURCE_DIR}/uv.lock"
-        "${CMAKE_CURRENT_SOURCE_DIR}/sos.spec" "${CMAKE_CURRENT_SOURCE_DIR}/entrypoint.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/sos.spec" "${CMAKE_CURRENT_SOURCE_DIR}/entrypoint.py" "${PROJECT_SOURCE_DIR}/LICENSE"
     COMMENT "Building the standalone TUI with its bundled daemon"
     USES_TERMINAL
     VERBATIM

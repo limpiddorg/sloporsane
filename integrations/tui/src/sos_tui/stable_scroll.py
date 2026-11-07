@@ -114,6 +114,6 @@ class StableScroll(VerticalScroll):
                            animate=False, immediate=True, force=True)
 
     def on_markdown_table_of_contents_updated(self, event):
-        anchor = self.pending_reading_anchor or self.reading_anchor()
+        anchor = self.pending_reading_anchor
         self.pending_reading_anchor = None
         self.call_after_refresh(self.restore_reading_anchor, anchor)

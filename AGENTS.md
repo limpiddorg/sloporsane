@@ -32,6 +32,9 @@ et lui rend la main. Le mode Slop du produit ne change pas cet accord.
   de l'application restent en anglais. Expliquer les changements et contrôles réels,
   distinguer les incertitudes, puis attendre la prochaine consigne.
 - Ne pas déléguer à des sous-agents, committer ou pousser sans demande explicite.
+- Messages de commit : `type(scope): description`, avec type et scope en minuscules
+  et description en anglais. Types possibles : `fix`, `feature`, `tests`, `docs`,
+  `build`, `ci`, `refactor`, `chore` selon l'intention du changement.
 
 ## Intention produit
 

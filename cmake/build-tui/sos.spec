@@ -6,7 +6,8 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
 source = Path(os.environ["SOS_TUI_SOURCE"])
-datas, binaries, hiddenimports = [], [(os.environ["SOSD_BINARY"], "sos_tui/bin")], []
+datas = [(str(source.parents[1] / "LICENSE"), ".")]
+binaries, hiddenimports = [(os.environ["SOSD_BINARY"], "sos_tui/bin")], []
 for package in ("textual", "pygments"):
     package_data, package_binaries, package_imports = collect_all(package)
     datas += package_data

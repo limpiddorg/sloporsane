@@ -128,7 +128,6 @@ class GenerationRetryTest(unittest.IsolatedAsyncioTestCase):
                 patch.object(self.app.client, "close", new_callable=AsyncMock), \
                 patch.object(self.app.client, "receive", new_callable=AsyncMock,
                              side_effect=[{"type": "integration.configured"}, OSError("Disconnected")]):
-            worker = SosApp.listen(self.app)
-            await worker.wait()
+            self.assertTrue(await self.app.listen_once())
         await self.pilot.pause()
         self.assertIsNone(self.app.retry_notice)
