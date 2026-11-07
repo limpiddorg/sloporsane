@@ -39,11 +39,10 @@
 *.out
 *.app
 
-# Build directories
-build/
-Build/
-build-*/
-!cmake/build-tui/
+# Root build directories
+/build/
+/Build/
+/build-*/
 
 # CMake generated files
 CMakeFiles/

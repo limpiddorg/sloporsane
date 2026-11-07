@@ -1,0 +1,66 @@
+name: Build and test SOS
+description: Build the native daemon, test both layers and smoke-test the standalone bundle.
+inputs:
+  platform:
+    description: Stable release platform name
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.8.22"
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++-14 ninja-build libcurl4-openssl-dev libssl-dev libxml2-dev ripgrep
+        echo "CC=gcc-14" >> "$GITHUB_ENV"
+        echo "CXX=g++-14" >> "$GITHUB_ENV"
+    - name: Install macOS dependencies
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install ninja openssl@3 libxml2 ripgrep
+    - name: Set up Python
+      shell: bash
+      run: |
+        uv python install 3.12
+        echo "UV_PROJECT_ENVIRONMENT=$GITHUB_WORKSPACE/build-ai/tui-venv" >> "$GITHUB_ENV"
+        uv sync --project integrations/tui --group build --locked --python 3.12
+      env:
+        UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/build-ai/tui-venv
+    - name: Configure
+      shell: bash
+      run: |
+        cmake -S . -B build-ai -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DSOS_BUILD_TEXTUAL=ON -DSOS_BUILD_FTXUI=OFF -DBUILD_TESTING=ON \
+          -DSOS_TUI_BIN_DIR="$GITHUB_WORKSPACE/build-ai/install/bin" \
+          -DSOS_TUI_INSTALL_DIR="$GITHUB_WORKSPACE/build-ai/install/app"
+    - name: Compile
+      shell: bash
+      run: cmake --build build-ai --parallel 3 --target sosd agent-runtime-tests daemon-transport-tests daemon-session-tests session-fixture
+    - name: Native tests
+      shell: bash
+      run: ctest --test-dir build-ai --output-on-failure --parallel 3 -E '^TuiBundleTest\.'
+    - name: Textual and installer tests
+      shell: bash
+      run: |
+        build-ai/tui-venv/bin/python integrations/tui/run_tests.py -j 1
+        build-ai/tui-venv/bin/python -B scripts/test_installer.py build-ai/installer-tests
+    - name: Build and smoke-test standalone archive
+      shell: bash
+      run: |
+        case "$(uname -s):$(uname -m):$PLATFORM" in
+          Darwin:arm64:macos-arm64|Linux:x86_64:linux-x86_64) ;;
+          *) echo 'Runner does not match the release platform' >&2; exit 1 ;;
+        esac
+        cmake --build build-ai --parallel 3 --target build-tui
+        archive=(build-ai/tui/dist/sos-*.tar.gz)
+        test "${#archive[@]}" -eq 1
+        test -f "${archive[0]}"
+        build-ai/tui-venv/bin/python cmake/build-tui/smoke_test.py "${archive[0]}"
+        mkdir -p build-ai/release
+        cp "${archive[0]}" "build-ai/release/sos-${PLATFORM}.tar.gz"
+      env:
+        PLATFORM: ${{ inputs.platform }}
