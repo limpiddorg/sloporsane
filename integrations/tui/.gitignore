@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.py[cod]
+dist/
+*.egg-info/
+src/sos_tui/bin/

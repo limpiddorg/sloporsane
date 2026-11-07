@@ -1,0 +1,8 @@
+#ifndef SOS_PROVIDER_FORMAT_HPP
+#define SOS_PROVIDER_FORMAT_HPP
+
+enum class ProviderFormat {
+    OPENAI_RESPONSES
+};
+
+#endif // SOS_PROVIDER_FORMAT_HPP

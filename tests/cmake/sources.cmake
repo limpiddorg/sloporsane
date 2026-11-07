@@ -1,0 +1,43 @@
+set(AGENT_RUNTIME_TEST_SOURCES
+    chat_completions_test.cpp
+    skills_test.cpp
+    generation_retry_test.cpp
+    image_support_test.cpp
+    image_test.cpp
+    responses_stream_test.cpp
+    responses_websocket_test.cpp
+    conversation_transformer_test.cpp
+    agent_test.cpp
+    openrouter_provider_test.cpp
+    read_tool_test.cpp
+    filesystem_tools_test.cpp
+    diff_test.cpp
+    common_tools_test.cpp
+    bash_analysis_test.cpp
+)
+
+set(DAEMON_TRANSPORT_TEST_SOURCES
+    transport_test.cpp
+)
+
+set(DAEMON_SESSION_TEST_SOURCES
+    agent_worktree_test.cpp
+    mcp_config_test.cpp
+    mcp_client_test.cpp
+    mcp_http_test.cpp
+    mcp_manager_test.cpp
+    mcp_oauth_test.cpp
+    turn_files_test.cpp
+    git_snapshot_test.cpp
+    implementation_worktree_test.cpp
+    btw_test.cpp
+    history_chunks_test.cpp
+    session_history_view_test.cpp
+    session_journal_test.cpp
+    compaction_test.cpp
+    provider_auth_test.cpp
+    session_test.cpp
+    permission_test.cpp
+    permission_modes_test.cpp
+    approved_replay_test.cpp
+)

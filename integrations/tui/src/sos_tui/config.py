@@ -1,0 +1,26 @@
+"""Color palette for the TUI."""
+
+BACKGROUND_COLOR = "#181B1B"
+TEXT_COLOR = "#E6EDF3"
+MUTED_COLOR = "#71808E"
+INPUT_BACKGROUND_COLOR = "#303A48"
+# Shared scrollbar interaction colors: muted and background darkened by 20%.
+SCROLLBAR_HOVER_COLOR = "#5A6672"
+SCROLLBAR_HOVER_BACKGROUND_COLOR = "#131616"
+# Precomputed: 50% #303A48 over #181B1B, using Textual's RGB rounding.
+CONTENT_BACKGROUND_COLOR = "#242A31"
+# Precomputed: 25% #303A48 over #181B1B, using Textual's RGB rounding.
+CODE_BACKGROUND_COLOR = "#101215"
+# Quote surface, lighter than INPUT_BACKGROUND_COLOR.
+QUOTE_BACKGROUND_COLOR = "#111419"
+INPUT_QUOTE_BACKGROUND_COLOR = "#252d38"
+SLOP_COLOR = "#F51D53"
+SANE_COLOR = "#05b07d"
+
+TITLE_MD = "#E9C46A"
+BOLD_MD = "#F4A38A"
+MISC_MD = "#81D8D0"
+DEPTH_MD = "#277be3"
+ALGAE_MD = "#8AD4A1"
+
+MODE_COLORS = {"sane": SANE_COLOR, "slop": SLOP_COLOR}
