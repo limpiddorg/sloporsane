@@ -33,7 +33,9 @@ runs:
     - name: Configure
       shell: bash
       run: |
+        # yaml-cpp 0.8 declares pre-3.5 policies, which CMake 4 no longer accepts.
         cmake -S . -B build-ai -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
           -DSOS_BUILD_TEXTUAL=ON -DSOS_BUILD_FTXUI=OFF -DBUILD_TESTING=ON \
           -DSOS_TUI_BIN_DIR="$GITHUB_WORKSPACE/build-ai/install/bin" \
           -DSOS_TUI_INSTALL_DIR="$GITHUB_WORKSPACE/build-ai/install/app"
