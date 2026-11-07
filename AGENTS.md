@@ -25,9 +25,12 @@ et lui rend la main. Le mode Slop du produit ne change pas cet accord.
   découverte qui change le comportement attendu, l'approche ou le périmètre.
 - Inspecter le code concerné avant de le modifier. Garder l'orchestration courte,
   nommer les étapes par leur intention et mutualiser les détails réellement dupliqués.
-- Exécuter les tests ciblés pendant les corrections, puis la suite pertinente une
-  seule fois en validation finale. Après un échec final, revenir aux tests ciblés
-  et préciser ce qui a été revérifié, sans relancer toute la suite à chaque ajustement.
+- Chaque commit doit rester livrable : tous les tests doivent passer. Exécuter les
+  tests ciblés pendant les corrections, puis toutes les suites de tests avant de
+  committer. Après un échec, corriger et revérifier en ciblé, puis relancer toutes
+  les suites sur l'état final avant le commit. Un test non exécuté ou une CI en
+  cours ne vaut pas un succès ; si une vérification est indisponible, signaler le
+  blocage et ne pas committer. Confirmer aussi la CI verte après chaque push.
 - Communiquer en français, directement et brièvement. Code, commentaires et textes
   de l'application restent en anglais. Expliquer les changements et contrôles réels,
   distinguer les incertitudes, puis attendre la prochaine consigne.

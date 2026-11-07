@@ -250,11 +250,15 @@ class ImplementationWorkspaceTest(unittest.IsolatedAsyncioTestCase):
         entry.focus()
         before = self.workspace.diff_index
         await self.pilot.press("right")
-        await self.pilot.pause()
+        self.assertEqual(card.selected_button, "permission-no")
+        await wait_until(self.pilot, lambda: card.query_one("#permission-no").has_focus,
+                         "proposal's decline focus after revealing the choice")
         self.assertTrue(card.query_one("#permission-no").has_focus)
         self.assertEqual(self.workspace.diff_index, before)
         await self.pilot.press("left")
-        await self.pilot.pause()
+        self.assertEqual(card.selected_button, "permission-yes")
+        await wait_until(self.pilot, lambda: card.query_one("#permission-yes").has_focus,
+                         "proposal's acceptance focus after revealing the choice")
         self.assertTrue(card.query_one("#permission-yes").has_focus)
         self.assertEqual(self.workspace.diff_index, before)
 

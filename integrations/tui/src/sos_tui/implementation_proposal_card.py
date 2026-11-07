@@ -32,6 +32,12 @@ class ImplementationProposalCard(PermissionCard):
         if self.owns_button_focus():
             self.focus_pending = False
 
+    def on_descendant_focus(self, event):
+        super().on_descendant_focus(event)
+        # Button.focus() is deferred; acknowledge focus only when it arrives.
+        if isinstance(event.widget, Button) and event.widget.has_focus:
+            self.focus_pending = False
+
     def compose(self):
         yield Static("", classes="permission-band")
         with Vertical(classes="permission-content"):
