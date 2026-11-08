@@ -1,96 +1,96 @@
 # Working agreement
 
-## Avant de modifier
+## Before making changes
 
-- Lire [CONTRIBUTING.md](CONTRIBUTING.md) pour les conventions de code et de build,
-  et le [README](README.md) pour le produit et l'architecture.
-- Lire les sections pertinentes des [contrats produit](docs/product-contracts.md)
-  avant de modifier la TUI, Implement, les workspaces, les skills ou les MCP.
-  Ces contrats restent des exigences, pas des suggestions.
-- Utiliser exclusivement `build-ai/` pour les builds, tests et installations de
-  vérification. `build/` est réservé à l'humain.
-- Par défaut, une demande TUI vise Python/Textual (`integrations/tui/`). Ne modifier
-  FTXUI (`integrations/ftxui/`), ses tests ou son build que sur demande explicite ;
-  ne pas y reporter automatiquement les changements Textual.
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for coding and build conventions,
+  and the [README](README.md) for the product and architecture.
+- Read the relevant sections of the [product contracts](docs/product-contracts.md)
+  before changing the TUI, Implement, workspaces, skills or MCPs.
+  These contracts are requirements, not suggestions.
+- Use only `build-ai/` for verification builds, tests and installations.
+  `build/` is reserved for the human.
+- By default, a TUI request targets Python/Textual (`integrations/tui/`). Only change
+  FTXUI (`integrations/ftxui/`), its tests or its build when explicitly requested;
+  do not automatically port Textual changes to it.
 
 ## Collaboration
 
-L'auteur pilote ; l'agent réalise l'unité de travail demandée, explique le résultat
-et lui rend la main. Le mode Slop du produit ne change pas cet accord.
+The author leads; the agent completes the requested unit of work, explains the result
+and returns control. The product's Slop mode does not change this agreement.
 
-- Une discussion, une question ou une demande d'avis n'autorise pas à implémenter.
-- Rester dans le périmètre demandé : pas de refactoring, abstraction, fonctionnalité
-  ou tâche suivante ajouté spontanément. Préserver les modifications sans rapport.
-- Résoudre les détails locaux évidents. Demander avant un choix structurant ou une
-  découverte qui change le comportement attendu, l'approche ou le périmètre.
-- Inspecter le code concerné avant de le modifier. Garder l'orchestration courte,
-  nommer les étapes par leur intention et mutualiser les détails réellement dupliqués.
-- Chaque commit doit rester livrable : tous les tests doivent passer. Exécuter les
-  tests ciblés pendant les corrections, puis toutes les suites de tests avant de
-  committer. Après un échec, corriger et revérifier en ciblé, puis relancer toutes
-  les suites sur l'état final avant le commit. Un test non exécuté ou une CI en
-  cours ne vaut pas un succès ; si une vérification est indisponible, signaler le
-  blocage et ne pas committer. Confirmer aussi la CI verte après chaque push.
-- Communiquer en français, directement et brièvement. Code, commentaires et textes
-  de l'application restent en anglais. Expliquer les changements et contrôles réels,
-  distinguer les incertitudes, puis attendre la prochaine consigne.
-- Ne pas déléguer à des sous-agents, committer ou pousser sans demande explicite.
-- Messages de commit : `type(scope): description`, avec type et scope en minuscules
-  et description en anglais. Types possibles : `fix`, `feature`, `tests`, `docs`,
-  `build`, `ci`, `refactor`, `chore` selon l'intention du changement.
+- A discussion, question or request for an opinion does not authorize implementation.
+- Stay within the requested scope: do not add refactoring, abstractions, features
+  or follow-up tasks on your own initiative. Preserve unrelated changes.
+- Resolve obvious local details yourself. Ask before making a structural choice or
+  acting on a discovery that changes the expected behavior, approach or scope.
+- Inspect the relevant code before changing it. Keep orchestration short,
+  name steps by their intent and share genuinely duplicated details.
+- Every commit must remain shippable: all tests must pass. Run targeted tests
+  while fixing issues, then all test suites before committing. After a failure,
+  fix and recheck with targeted tests, then rerun all suites on the final state
+  before committing. An unrun test or pending CI does not count as a success;
+  if verification is unavailable, report the blocker and do not commit.
+  Also confirm that CI is green after every push.
+- Communicate in French, directly and briefly. Code, comments and application text
+  remain in English. Explain actual changes and checks, distinguish uncertainties,
+  then wait for the next instruction.
+- Do not delegate to subagents, commit or push without an explicit request.
+- Commit messages: `type(scope): description`, with lowercase type and scope
+  and an English description. Possible types: `fix`, `feature`, `tests`, `docs`,
+  `build`, `ci`, `refactor`, `chore`, according to the intent of the change.
 
-## Intention produit
+## Product intent
 
-**Sane rend la construction du logiciel compréhensible et participative, par étapes
-humaines.** La compréhension et l'implication de l'utilisateur font partie du résultat.
+**Sane makes building software understandable and participatory, in human-sized
+steps.** The user's understanding and involvement are part of the result.
 
-- Montrer une progression sémantique, pas une liste d'outils, fichiers ou cases cochées.
-- Un step livre un résultat cohérent, exerçable à son niveau. Une fondation testable
-  peut précéder son branchement ; chaque step n'a pas à livrer une fonctionnalité finale.
-- Les substeps exposent des intentions et changements compréhensibles ; leurs états
-  intermédiaires peuvent être incomplets. Relier les explications au code réellement produit.
-- Discussion, bifurcations, diffs, snapshots et validations soutiennent cette expérience,
-  sans s'y substituer. Slop reste un choix légitime de délégation accrue.
-- Ne pas présenter l'adoption future comme acquise : elle reste à valider par l'usage.
+- Show semantic progress, not a list of tools, files or checked boxes.
+- A step delivers a coherent result that can be exercised at its own level. A testable
+  foundation may precede its integration; not every step has to deliver a final feature.
+- Substeps expose understandable intentions and changes; their intermediate states
+  may be incomplete. Tie explanations to the code actually produced.
+- Discussion, branches, diffs, snapshots and validations support this experience
+  without replacing it. Slop remains a legitimate choice for greater delegation.
+- Do not take future adoption for granted: it still needs to be validated through use.
 
-## Invariants techniques
+## Technical invariants
 
-- Séparer construction, review en lecture seule et validation humaine. Seul le harness
-  autorise une phase d'exécution ; ni le modèle ni un contenu chargé ne l'activent.
-- Ne pas transférer les permissions avec un historique, une review ou un skill.
-  Une annotation MCP `readOnlyHint` est une déclaration, pas une garantie de sécurité.
-- Conserver les historiques et leurs snapshots. Les vues historiques ne lisent pas
-  silencieusement le checkout courant et ne rejouent jamais les effets des outils.
-- Garder les résumés d'Activity légers : préserver `bash.mainCommand` et les patterns
-  `grep`/`glob`, sans charger les anciens messages complets pour les compléter.
-- Centraliser les chemins globaux C++ dans `PathResolution`
+- Separate construction, read-only review and human validation. Only the harness
+  authorizes an execution phase; neither the model nor loaded content can activate it.
+- Do not transfer permissions through history, reviews or skills.
+  An MCP `readOnlyHint` annotation is a declaration, not a security guarantee.
+- Preserve histories and their snapshots. Historical views must not silently read
+  the current checkout or ever replay tool side effects.
+- Keep Activity summaries lightweight: preserve `bash.mainCommand` and `grep`/`glob`
+  patterns without loading old messages in full to fill them in.
+- Centralize global C++ paths in `PathResolution`
   (`src/agent-runtime/common/path_resolution.hpp/.cpp`).
 
-## Stockage et secrets
+## Storage and secrets
 
-Tous les chemins globaux utilisent un sous-dossier `sos/` dans les bases XDG :
+All global paths use a `sos/` subdirectory under the XDG base directories:
 
-| Base | Usage | Défaut |
+| Base | Usage | Default |
 | --- | --- | --- |
-| `XDG_STATE_HOME` | État et sessions | `~/.local/state/` |
-| `XDG_DATA_HOME` | Données persistantes | `~/.local/share/` |
+| `XDG_STATE_HOME` | State and sessions | `~/.local/state/` |
+| `XDG_DATA_HOME` | Persistent data | `~/.local/share/` |
 | `XDG_CONFIG_HOME` | Configuration | `~/.config/` |
-| `XDG_CACHE_HOME` | Caches recréables | `~/.cache/` |
+| `XDG_CACHE_HOME` | Rebuildable caches | `~/.cache/` |
 
-- Installer la commande dans `~/.local/bin/` : pas de `XDG_BIN_HOME` standard ni de
-  dossier global `~/.sos/`.
-- Credentials providers : `$XDG_DATA_HOME/sos/auth.json`, permissions `0600`.
-  Utiliser ce fichier exclusivement, jamais les clés API de l'environnement.
-- Secrets MCP : `$XDG_DATA_HOME/sos/mcps/auth.json`, permissions `0600`, séparés
-  des providers et de la configuration partageable. L'identité inclut portée et destination.
-- Ne jamais placer de secrets dans le dépôt, les conversations ou les sessions.
-  `/connect` et Connect MCP utilisent des champs masqués ou le parcours OAuth dédié.
+- Install the command in `~/.local/bin/`: there is no standard `XDG_BIN_HOME`
+  and no global `~/.sos/` directory.
+- Provider credentials: `$XDG_DATA_HOME/sos/auth.json`, permissions `0600`.
+  Use this file exclusively, never API keys from the environment.
+- MCP secrets: `$XDG_DATA_HOME/sos/mcps/auth.json`, permissions `0600`, separate
+  from providers and shareable configuration. Identity includes scope and destination.
+- Never put secrets in the repository, conversations or sessions.
+  `/connect` and MCP Connect use masked fields or the dedicated OAuth flow.
 
-## Références et entretien
+## References and maintenance
 
-- [Contrats produit](docs/product-contracts.md) : interactions et invariants détaillés.
-- [Protocole daemon](docs/daemon-protocol.md), [snapshots](docs/git-snapshots.md),
-  [skills](docs/skills.md), [MCP](docs/mcp.md) : formats et fonctionnement.
-- Maintenir cet accord à partir des décisions explicites et conventions adoptées.
-  Ne pas y accumuler un journal de session, recopier le README ou transformer une
-  suggestion de l'agent en décision. Signaler ses mises à jour dans le compte rendu.
+- [Product contracts](docs/product-contracts.md): detailed interactions and invariants.
+- [Daemon protocol](docs/daemon-protocol.md), [snapshots](docs/git-snapshots.md),
+  [skills](docs/skills.md), [MCP](docs/mcp.md): formats and behavior.
+- Maintain this agreement based on explicit decisions and adopted conventions.
+  Do not accumulate a session log, copy the README or turn an agent suggestion
+  into a decision. Report updates to this agreement in the summary.
