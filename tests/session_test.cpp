@@ -5758,7 +5758,7 @@ TEST_F(SessionTest, AICheckModelSelectionIsVersionedPersistentAndNeverReturnsThe
         EXPECT_EQ(rejected.at("type"), "request.failed");
         EXPECT_EQ(rejected.dump().find("test-decision-secret"), std::string::npos);
         EXPECT_EQ(preferences->permissionConfidence(), 91);
-        EXPECT_EQ(preferences->permissionModel().endpoint, model.at("endpoint"));
+        EXPECT_EQ(preferences->permissionModel().endpoint, model.at("endpoint").get<std::string>());
         co_await client.send({{"type", "integration.close"}});
     }, {}, {}, std::chrono::seconds(5), std::chrono::milliseconds(500), preferences);
     ProviderConnections restored(auth, directory / "config.json");
