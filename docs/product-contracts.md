@@ -74,6 +74,22 @@ Les interactions TUI décrites ici visent Python/Textual, pas une obligation de 
 - Les chats suivent les messages uniquement si l'utilisateur est en bas ; ne pas déplacer
   une personne remontée dans l'historique.
 
+## Version et mises à jour
+
+- Afficher seulement `dev` ou `vMAJOR.MINOR.PATCH` en haut à droite, sur la ligne des tabs. La version est
+  embarquée au build via `SOS_VERSION`, `dev` par défaut et tag pour les releases.
+- Un build `dev` ne consulte jamais le backend pour les mises à jour. Une version
+  stable vérifie au lancement, en arrière-plan et sans bloquer, la version publiée
+  servie par le même backend que l'installateur. Échec réseau silencieux.
+- Nouvelle version : popup en anglais, `Not now` sélectionné par défaut, Échap
+  ferme. Avertir que toutes les TUI SOS et le daemon de l'utilisateur seront fermés.
+- Après accord, quitter Textual et passer à un processus Bash indépendant dans le
+  même terminal. Une seule confirmation ; préparer/vérifier les téléchargements
+  avant d'arrêter les autres processus. Le processus d'installation survit à l'arrêt
+  de SOS et du daemon, puis relance uniquement l'instance initiatrice dans son
+  workspace, avec son socket. En cas d'échec, garder le lanceur précédent et
+  afficher l'erreur dans le terminal. Refuser une version différente de celle validée.
+
 ## Construction et inspection
 
 - Un step ne se déplie qu'une fois construit. Cliquer inspecte, sans Cancel ni validation.

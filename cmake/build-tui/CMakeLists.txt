@@ -1,5 +1,11 @@
 find_program(UV_EXECUTABLE NAMES uv REQUIRED)
 
+set(SOS_VERSION "dev" CACHE STRING "SOS release version, or dev to disable update checks")
+if(NOT SOS_VERSION MATCHES "^(dev|v?[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?)$")
+    message(FATAL_ERROR "SOS_VERSION must be dev or a release version such as v0.0.1")
+endif()
+file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/VERSION" CONTENT "@SOS_VERSION@\n" @ONLY)
+
 set(TUI_SOURCE_DIR "${PROJECT_SOURCE_DIR}/integrations/tui")
 set(TUI_DIST_DIR "${PROJECT_BINARY_DIR}/tui/dist")
 set(TUI_BUNDLE_DIR "${TUI_SOURCE_DIR}/src/sos_tui/bin")
@@ -15,12 +21,13 @@ add_custom_command(
     COMMAND "${UV_EXECUTABLE}" sync --project "${TUI_SOURCE_DIR}" --group build --locked
     COMMAND "${CMAKE_COMMAND}" -E env
         "SOSD_BINARY=$<TARGET_FILE:sosd>" "SOS_TUI_SOURCE=${TUI_SOURCE_DIR}"
+        "SOS_VERSION_FILE=${CMAKE_CURRENT_BINARY_DIR}/VERSION"
         "${UV_EXECUTABLE}" run --project "${TUI_SOURCE_DIR}" --no-sync python -m PyInstaller
         --noconfirm --log-level WARN --distpath "${TUI_DIST_DIR}" --workpath "${PROJECT_BINARY_DIR}/tui/pyinstaller"
         "${CMAKE_CURRENT_SOURCE_DIR}/sos.spec"
     COMMAND "${CMAKE_COMMAND}" -E chdir "${TUI_DIST_DIR}"
         "${CMAKE_COMMAND}" -E tar cfz "${TUI_ARCHIVE}" --format=gnutar sos
-    DEPENDS sosd ${TUI_SOURCES} "${TUI_SOURCE_DIR}/pyproject.toml" "${TUI_SOURCE_DIR}/uv.lock"
+    DEPENDS sosd "${CMAKE_CURRENT_BINARY_DIR}/VERSION" ${TUI_SOURCES} "${TUI_SOURCE_DIR}/pyproject.toml" "${TUI_SOURCE_DIR}/uv.lock"
         "${CMAKE_CURRENT_SOURCE_DIR}/sos.spec" "${CMAKE_CURRENT_SOURCE_DIR}/entrypoint.py" "${PROJECT_SOURCE_DIR}/LICENSE"
     COMMENT "Building the standalone TUI with its bundled daemon"
     USES_TERMINAL

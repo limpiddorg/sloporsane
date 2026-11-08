@@ -69,6 +69,8 @@ from .history_window import HistoryWindow
 from .history_viewport import HistoryActivity, HistoryViewport
 from .permission_card import PermissionCard
 from .question_screen import QuestionScreen
+from .updates import VERSION, latest_update, install_and_restart
+from .update_screen import UpdateScreen
 
 
 @dataclass
@@ -107,7 +109,9 @@ class SosApp(App[None]):
         scrollbar-background-active: $scrollbar-hover-background; }
     Screen { background: $background; color: $foreground; }
     DialogScreen { background: $background 70%; }
-    #tabs { height: 1; }
+    #top-bar { height: 1; }
+    #tabs { height: 1; width: 1fr; }
+    #app-version { height: 1; width: auto; padding: 0 1; color: $muted; }
     #discussion-body { height: 1fr; }
     #discussion-column { width: 1fr; height: 1fr; }
     HistoryViewport .objective-history { display: none; }
@@ -296,7 +300,9 @@ class SosApp(App[None]):
         self.permissions_requests: dict[str, PermissionsScreen] = {}
 
     def compose(self) -> ComposeResult:
-        yield Tabs(Tab("Discussion", id="discussion"), id="tabs")
+        with Horizontal(id="top-bar"):
+            yield Tabs(Tab("Discussion", id="discussion"), id="tabs")
+            yield Static(VERSION if VERSION == "dev" else "v" + VERSION.removeprefix("v"), id="app-version", markup=False)
         chat = HistoryViewport(self.history_window, self.client.send, id="chat", classes="conversation-history")
         details = SkillDetails()
         suggestions = CommandSuggestions(quote_source=lambda: chat.quote_source,
@@ -326,6 +332,24 @@ class SosApp(App[None]):
         self.query_one(MessageInput).focus()
         self.set_interval(1, self.check_auto_recap)
         self.listen()
+        self.update_version = None
+        if VERSION != "dev":
+            self.check_updates()
+
+    @work(group="update-check", exclusive=True)
+    async def check_updates(self):
+        version = await asyncio.to_thread(latest_update, VERSION)
+        if version is None:
+            return
+        # Do not replace another dialog or discard an approval being answered.
+        while isinstance(self.screen, ModalScreen):
+            await asyncio.sleep(0.2)
+        self.push_screen(UpdateScreen(version), lambda accepted: self.update_decided(accepted, version))
+
+    def update_decided(self, accepted, version):
+        if accepted:
+            self.update_version = version
+            self.exit()
 
     async def check_auto_recap(self) -> None:
         if self.recap_idle_session != self.session_id:
@@ -453,12 +477,14 @@ class SosApp(App[None]):
                 self.running_activity = None
 
     def on_mode_button_spinner_frame(self, event: ModeButton.SpinnerFrame) -> None:
-        if self.implementation.discussion_preview:
+        # A queued spinner message may arrive after shutdown unmounted the chat.
+        viewport = next(iter(self.query(HistoryViewport)), None)
+        if viewport is None or self.implementation.discussion_preview:
             return
         if self.busy and self.running_compaction is not None:
             self.running_compaction.title = self.compaction_title(ActivityToggle.SPINNER_FRAMES[event.index % 4])
         if self.busy:
-            footer = self.query_one(HistoryViewport).live_footer
+            footer = viewport.live_footer
             if footer is not None:
                 footer.update_elapsed()
             activities = {activity for activity in (self.running_activity, self.current_activity)
@@ -470,6 +496,8 @@ class SosApp(App[None]):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         workspace = self.query_one(ImplementationWorkspace) if self.is_mounted else None
         inspecting = workspace is not None and workspace.display and not workspace.revision_page_visible and not isinstance(self.screen, ModalScreen)
+        if action == "request_cancel" and isinstance(self.screen, UpdateScreen):
+            return False
         if action == "implementation_slash":
             return inspecting and not isinstance(self.focused, MessageInput)
         if action == "implementation_enter":
@@ -2297,5 +2325,9 @@ class SosApp(App[None]):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Chat with the local sosd daemon")
     parser.add_argument("--socket", default="/tmp/sosd.sock", help="Daemon Unix socket path")
+    parser.add_argument("--version", action="version", version=f"SOS {VERSION.removeprefix('v')}")
     args = parser.parse_args()
-    SosApp(args.socket).run()
+    app = SosApp(args.socket)
+    app.run()
+    if app.update_version is not None:
+        install_and_restart(app.update_version, app.workspace, ["--socket", args.socket])

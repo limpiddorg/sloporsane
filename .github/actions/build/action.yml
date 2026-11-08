@@ -4,6 +4,9 @@ inputs:
   platform:
     description: Stable release platform name
     required: true
+  version:
+    description: Embedded release version, or dev
+    default: dev
 runs:
   using: composite
   steps:
@@ -38,9 +41,12 @@ runs:
         echo "Using $jobs workers for builds and tests"
     - name: Configure
       shell: bash
+      env:
+        SOS_VERSION: ${{ inputs.version }}
       run: |
         # yaml-cpp 0.8 declares pre-3.5 policies, which CMake 4 no longer accepts.
         cmake -S . -B build-ai -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DSOS_VERSION="$SOS_VERSION" \
           -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
           -DSOS_BUILD_TEXTUAL=ON -DSOS_BUILD_FTXUI=OFF -DBUILD_TESTING=ON \
           -DSOS_TUI_BIN_DIR="$GITHUB_WORKSPACE/build-ai/install/bin" \

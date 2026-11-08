@@ -95,6 +95,49 @@ a failed download or verification does not replace the current launcher.
 Concurrent installers are rejected by a lock. An uncatchable termination may
 leave `.install.lock`; remove it only after confirming no installer is running.
 
+## Version and in-app updates
+
+`SOS_VERSION` is a CMake cache variable, defaulting to `dev`. Release builds set it
+from the validated Git tag; ordinary CI builds stay `dev`. The value is written
+into the bundle, not inferred from the install directory or overridden at runtime.
+It appears as `dev` or `vMAJOR.MINOR.PATCH` at the right of the tabs row, and in
+`sos --version`.
+For local testing (no installation into the real home is needed):
+
+```sh
+cmake -S . -B build-ai -DSOS_VERSION=v0.0.1
+cmake --build build-ai --target build-tui
+build-ai/tui/dist/sos/sos --version
+# Launch this exact bundle, not a previously installed `sos` from PATH.
+build-ai/tui/dist/sos/sos
+# Restore development builds explicitly; CMake caches the value.
+cmake -S . -B build-ai -DSOS_VERSION=dev
+```
+
+A `dev` build performs no update request. A stable version checks
+`https://limpidd.com/api/releases/latest` once per TUI launch in the background.
+The endpoint returns JSON `{"version":"v0.0.2"}` from the same validated release
+and five-minute cache as `/install`, respecting backend release pinning. Drafts
+and prereleases are not offered. Compare numeric major/minor/patch values; failures,
+invalid responses, equal/older versions and unavailable network are silent.
+
+The update dialog defaults to **Not now** and explains that all of this user's
+SOS applications and daemon will close. Acceptance exits Textual and execs Bash
+in the original terminal. Bash fetches `/install` over HTTPS and runs it with
+`--yes --expected-version VERSION`: there is no second prompt. If the backend's
+selected release has changed since confirmation, abort before installing. The
+installer must advertise `# SOS_UPDATE_PROTOCOL=1`; older templates that do not
+understand the confirmation/version arguments are rejected, not executed.
+The independent Bash process is not named `sos`/`sosd` and survives their shutdown.
+After installation, it execs `~/.local/bin/sos` in the originating workspace with
+the same socket argument, resetting PyInstaller's environment. Other closed TUI
+instances are not reopened. A failed install does not restart SOS; diagnostics stay
+in the terminal and the previous launcher remains unchanged.
+
+The backend code lives in the separate webapp repository; deploy its endpoint
+before shipping a version that checks for updates. Existing `v0.0.1` bundles do
+not gain in-app updating retroactively.
+
 ## Local verification
 
 ```sh

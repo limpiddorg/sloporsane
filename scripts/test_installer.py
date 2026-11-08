@@ -120,6 +120,21 @@ cp "$TEST_RELEASE/${url##*/}" "$output"
     def link(self):
         return self.home / ".local/bin/sos"
 
+    def test_confirmed_tui_update_needs_no_terminal_or_second_prompt(self):
+        result = subprocess.run(["/bin/bash", str(self.script), "--yes", "--expected-version", "v0.1.0"],
+                                env=self.env, cwd=self.root, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, start_new_session=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Continue?", result.stdout)
+        self.assertTrue(self.link.is_file())
+
+    def test_release_changed_since_popup_fails_before_writes(self):
+        result = subprocess.run(["/bin/bash", str(self.script), "--yes", "--expected-version", "v0.2.0"],
+                                env=self.env, cwd=self.root, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Release changed", result.stderr)
+        self.assertFalse(self.home.exists())
+
     def test_no_is_default_and_does_not_write_or_stop_processes(self):
         result = self.run_installer(decision=b"\r")
         self.assertIn("[No]  Yes", result.stdout)

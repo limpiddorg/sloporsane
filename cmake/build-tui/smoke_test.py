@@ -75,9 +75,10 @@ def launch(executable: Path, root: Path, socket_path: Path) -> None:
         wait_for(b"/resume")
         os.write(master, b"\r")
         wait_for(b"No saved sessions")
-        os.write(master, b"\x1b")
-        time.sleep(0.2)
-        os.write(master, b"\x11")  # Ctrl+Q.
+        # An isolated ESC is timeout-delimited. On a busy runner, ESC and Ctrl+Q
+        # can be read together as Alt+Ctrl+Q despite a sleep between writes.
+        # CSI-u encodes Escape explicitly, so both keys remain unambiguous.
+        os.write(master, b"\x1b[27u\x11")  # Escape, then Ctrl+Q.
         deadline = time.monotonic() + 5
         while process.poll() is None and time.monotonic() < deadline:
             read_output()
