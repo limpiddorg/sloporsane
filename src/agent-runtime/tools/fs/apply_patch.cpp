@@ -71,15 +71,16 @@ std::string update(const std::vector<std::string>& patch, std::size_t& index, co
 void from_json(const nlohmann::json& json, ApplyPatchArguments& value) { json.at("patchText").get_to(value.patchText); }
 
 ToolDefinition ApplyPatchTool::getDefinition() const {
-    return {"apply_patch", "Apply a file-oriented patch enclosed by *** Begin Patch and *** End Patch. "
+    return fs_tools::withExplanation({"apply_patch", "Apply a file-oriented patch enclosed by *** Begin Patch and *** End Patch. "
         "Use *** Add File: path (all content lines prefixed +), *** Delete File: path, or *** Update File: path. "
         "Updates contain @@ hunks with space-prefixed context, - removals and + additions; optional @@ anchor locates a preceding line. "
         "An update may include *** Move to: path before its hunks. *** End of File anchors a hunk at EOF. "
         "Existing add/move destinations and repeated paths are rejected. Read files before patching.",
-        {{"type", "object"}, {"properties", {{"patchText", {{"type", "string"}}}}}, {"required", {"patchText"}}}};
+        {{"type", "object"}, {"properties", {{"patchText", {{"type", "string"}}}}}, {"required", {"patchText"}}}}, explained);
 }
 
 ToolResult ApplyPatchTool::execute(const nlohmann::json& arguments, const ToolContext& context) const {
+    const auto explanation = fs_tools::explanation(arguments, explained);
     const auto params = arguments.get<ApplyPatchArguments>();
     const auto patch = fs_tools::lines(fs_tools::normalizeLines(params.patchText));
     if (patch.size() < 3 || patch.front() != "*** Begin Patch" || patch.back() != "*** End Patch")
@@ -158,7 +159,7 @@ ToolResult ApplyPatchTool::execute(const nlohmann::json& arguments, const ToolCo
             if (change.type != "delete") fs_tools::writeText(change.target, change.after);
             if (change.type == "delete" || change.type == "move") fs::remove(change.path);
         }
-    });
+    }, explanation);
     for (const auto& change : changes) {
         output += (change.type == "add" ? "A " : change.type == "delete" ? "D " : "M ") +
             fs_tools::relative(context, change.target) + '\n';

@@ -20,6 +20,7 @@ from .slash_commands import COMMANDS
 from .history_transfer import HistoryTransfer
 from .mode_button import ModeButton
 from .implementation_code import HistoricalCode, change_zones
+from .workspace_path import WorkspacePath
 from .implementation_changes_tree import ImplementationChangesTree
 from .agent_info_bar import AgentInfoBar
 from .implementation_review_chat import ImplementationReviewChat
@@ -113,7 +114,12 @@ class ImplementationWorkspace(Vertical):
     #implementation-diff.description #implementation-patch { width: 100%; min-width: 0; }
     #implementation-diff.centered { align: center middle; }
     #implementation-diff.centered #implementation-patch { width: auto; max-width: 100%; text-align: left; }
-    #implementation-file { height: auto; padding: 0 1; color: $title-md; }
+    #implementation-diff-header { height: 1; display: none; }
+    #implementation-file { height: 1; width: 1fr; min-width: 0; padding: 0 1; color: $title-md; }
+    #implementation-explanation-hint { height: 1; width: auto; padding: 0 1; color: $text-muted; }
+    #implementation-explanation-panel { display: none; height: auto; max-height: 6;
+        padding: 0 1; border-bottom: solid $depth-md; }
+    #implementation-explanation { height: auto; }
     #implementation-diff-count { height: 1; width: 1fr; content-align: left middle; padding: 0 1; background: $input-background; text-style: bold; }
     #implementation-chat { width: 1fr; border-left: solid $depth-md; display: none; }
     #implementation-review-composer { height: auto; background: $input-background; }
@@ -146,6 +152,7 @@ class ImplementationWorkspace(Vertical):
         self.diff_index = 0
         self.diff_positions = {}
         self.chat_open = False
+        self.explanations_visible = True
         self.plan_visible = False
         self.conclusion_visible = False
         self.revision_page_visible = False
@@ -195,7 +202,11 @@ class ImplementationWorkspace(Vertical):
                     with Vertical(id="implementation-diff-column"):
                         yield Static("", id="implementation-version-overview", markup=False)
                         yield Static("", id="implementation-diff-count", markup=False)
-                        yield Static("", id="implementation-file", markup=False)
+                        with Horizontal(id="implementation-diff-header"):
+                            yield WorkspacePath("", id="implementation-file", markup=False)
+                            yield Static("E Toggle explanation", id="implementation-explanation-hint", markup=False)
+                        with VerticalScroll(id="implementation-explanation-panel"):
+                            yield Static("", id="implementation-explanation", markup=False)
                         with HistoricalCode(id="implementation-diff"):
                             yield Static("", id="implementation-patch", markup=False)
                         yield ImplementationStepView(id="implementation-step-view", classes="conversation-history")
@@ -473,7 +484,7 @@ class ImplementationWorkspace(Vertical):
         self.query_one("#implementation-conclusion-action").display = False
         self.query_one("#implementation-close").display = False
         for selector in ("#implementation-diff", "#implementation-step-view", "#implementation-validate",
-                         "#implementation-file", "#implementation-diff-count", "#implementation-chat"):
+                         "#implementation-file", "#implementation-diff-header", "#implementation-diff-count", "#implementation-chat", "#implementation-explanation-panel"):
             self.query_one(selector).display = False
         self.query_one(ImplementationChangesTree).show_files([], [], [], str, 0)
         self.query_one("#implementation-accepted-plan").display = True
@@ -828,7 +839,7 @@ class ImplementationWorkspace(Vertical):
         self.query_one(ImplementationChangesTree).show_files([], [], [], str, 0)
         self.query_one("#implementation-show-plan", Button).set_class(False, "selected")
         for selector in ("#implementation-diff", "#implementation-step-view", "#implementation-validate",
-                         "#implementation-file", "#implementation-diff-count", "#implementation-chat"):
+                         "#implementation-file", "#implementation-diff-header", "#implementation-diff-count", "#implementation-chat", "#implementation-explanation-panel"):
             self.query_one(selector).display = False
         document = self.query_one("#implementation-accepted-plan")
         document.display = True
@@ -848,7 +859,7 @@ class ImplementationWorkspace(Vertical):
         self.query_one(ImplementationChangesTree).show_files([], [], [], str, 0)
         self.query_one("#implementation-show-plan", Button).set_class(self.plan_visible, "selected")
         for selector in ("#implementation-diff", "#implementation-step-view", "#implementation-validate",
-                         "#implementation-file", "#implementation-diff-count", "#implementation-chat"):
+                         "#implementation-file", "#implementation-diff-header", "#implementation-diff-count", "#implementation-chat", "#implementation-explanation-panel"):
             self.query_one(selector).display = False
         document = self.query_one("#implementation-accepted-plan")
         document.display = True
@@ -913,6 +924,7 @@ class ImplementationWorkspace(Vertical):
 
     def show_item_view(self, s, u, plan, built, part, substep):
         code = self.query_one("#implementation-diff", HistoricalCode)
+        self.sync_diff_explanation()
         timeline = self.query_one(ImplementationStepView)
         timeline.display = bool(plan and u == -1)
         code.display = not timeline.display
@@ -927,7 +939,7 @@ class ImplementationWorkspace(Vertical):
                 self.render_step()
             return
         zone = self.zones[self.diff_index - 1] if self.diff_index else None
-        zone_signature = (zone.path, zone.center, tuple(zone.rows)) if zone else None
+        zone_signature = (zone.path, zone.center, zone.end, zone.explanation, tuple(zone.rows)) if zone else None
         view = (self.selection, self.diff_index, part["explanation"] if part else "", part["complete"] if part else False,
                 tuple(p["reviewed"] for p in built["substeps"]) if built else (), built["whole"]["reviewed"] if built else False,
                 zone_signature)
@@ -971,6 +983,8 @@ class ImplementationWorkspace(Vertical):
         filename = self.query_one("#implementation-file", Static)
         filename.update(self.display_path(zone.path) if zone else "")
         filename.display = zone is not None
+        self.query_one("#implementation-diff-header").display = zone is not None
+        self.query_one("#implementation-explanation-hint").display = zone is not None and not self.chat_open
         counter = self.query_one("#implementation-diff-count", Static)
         counter.update(f"{self.diff_index}/{len(self.zones)}" if zone else "")
         counter.display = zone is not None
@@ -1008,6 +1022,22 @@ class ImplementationWorkspace(Vertical):
                     enter = "Enter Continue"
         return (navigation if len(self.zones) > 1 else "") + listing + (
             " · Tab Close chat" if self.chat_open else f" · {enter} · Tab Chat")
+
+    def sync_diff_explanation(self):
+        zone = self.zones[self.diff_index - 1] if self.diff_index and self.zones else None
+        panel = self.query_one("#implementation-explanation-panel")
+        panel.display = bool(zone and self.explanations_visible)
+        text = (zone.explanation or "No explanation available. This change may come from a terminal command.") if zone else ""
+        body = self.query_one("#implementation-explanation", Static)
+        if body.render().plain != text:
+            body.update(text)
+            panel.scroll_home(animate=False)
+
+    def toggle_diff_explanation(self):
+        if self.chat_open or not self.zones:
+            return
+        self.explanations_visible = not self.explanations_visible
+        self.sync_diff_explanation()
 
     def navigate(self, direction, *, diffs=False):
         version = self.query_one("#implementation-version-label")

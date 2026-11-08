@@ -36,7 +36,7 @@ struct ApprovedToolAction {
     std::optional<double> confidence;
 };
 
-using FileMutationHandler = std::function<void(const std::vector<std::filesystem::path>&, const std::function<void()>&)>;
+using FileMutationHandler = std::function<void(const std::vector<std::filesystem::path>&, const std::function<void()>&, const std::string&)>;
 
 struct ToolContext {
     std::filesystem::path directory;

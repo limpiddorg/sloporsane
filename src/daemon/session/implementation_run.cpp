@@ -406,6 +406,9 @@ std::string ImplementationRun::instruction() const {
 
 std::string ImplementationRun::completionGuidance() const {
     std::string text = "\nTechnical validation is the final phase of building this step, not a read-only review or a stopping point. "
+        "Every edit, write and apply_patch requires an explanation for the diff panel: briefly describe what changes and why. "
+        "You may reuse the same explanation for similar edits, such as a variable rename. "
+        "When correcting a reviewed diff, rewrite its complete current explanation, including earlier changes still present and the new correction, not only the latest delta. "
         "During construction, do not run tests, builds, linters or verification-only diff/status inspections, or repeatedly check whether everything is correct. Reserve those checks for Validating the step; reads needed to implement the current substep remain appropriate. "
         "Keep validation proportional to this step: if tests, builds or other checks are needed, perform them in validation, not during construction. "
         "Prefer existing tests and short targeted checks. Do not build an ad-hoc test framework or a large DOM/timer simulation merely to compensate for an unavailable browser; report the unverified interaction instead unless the plan or a concrete risk requires that check. "

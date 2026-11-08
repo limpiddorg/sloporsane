@@ -19,10 +19,13 @@ std::string normalizeLines(const std::string& text);
 std::string withOriginalFormat(const std::string& text, const std::string& original);
 std::string withoutBom(const std::string& text);
 std::mutex& mutationMutex();
-inline void mutate(const ToolContext& context, const std::vector<std::filesystem::path>& paths, const std::function<void()>& action) {
-    if (context.mutateFiles) context.mutateFiles(paths, action);
+inline void mutate(const ToolContext& context, const std::vector<std::filesystem::path>& paths, const std::function<void()>& action,
+    const std::string& explanation = {}) {
+    if (context.mutateFiles) context.mutateFiles(paths, action, explanation);
     else action();
 }
+ToolDefinition withExplanation(ToolDefinition definition, bool required);
+std::string explanation(const nlohmann::json& arguments, bool required);
 }
 
 #endif // SOS_FS_COMMON_HPP

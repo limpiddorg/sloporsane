@@ -618,12 +618,12 @@ void Session::sendMessage(const std::string& text, ExecutionMode mode, std::chro
         }) : Agent::ImplementationProgressHandler{});
     state.discussionAgent->setFileMutationHandler([files = turnFiles, guard = constructionTurn ? implementationMutationGuard : std::function<void(bool)>{},
         capture = constructionTurn ? implementationProgress : decltype(implementationProgress){}]
-        (const auto& paths, const auto& action) {
+        (const auto& paths, const auto& action, const auto& explanation) {
             if (guard) guard(paths.empty());
             files->mutate(paths, action, capture ? std::function<void(const TurnSnapshot&)>([&](const auto& snapshot) {
                 std::vector<std::string> orderedPaths;
                 for (const auto& path : paths) orderedPaths.push_back(path.string());
-                capture({{"status", "mutation"}, {"paths", orderedPaths}}, snapshot);
+                capture({{"status", "mutation"}, {"paths", orderedPaths}, {"explanation", explanation}}, snapshot);
             }) : std::function<void(const TurnSnapshot&)>{});
         });
     announceMode(mode);

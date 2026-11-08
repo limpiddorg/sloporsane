@@ -51,13 +51,14 @@ void from_json(const nlohmann::json& json, EditArguments& value) {
 }
 
 ToolDefinition EditTool::getDefinition() const {
-    return {"edit", "Replace oldString with newString in a file. oldString must identify a unique occurrence unless replaceAll is true. Read the file first. Empty oldString creates a new file only; use write to overwrite a whole file.",
+    return fs_tools::withExplanation({"edit", "Replace oldString with newString in a file. oldString must identify a unique occurrence unless replaceAll is true. Read the file first. Empty oldString creates a new file only; use write to overwrite a whole file.",
         {{"type", "object"}, {"properties", {{"filePath", {{"type", "string"}}}, {"oldString", {{"type", "string"}}},
             {"newString", {{"type", "string"}}}, {"replaceAll", {{"type", "boolean"}}}}},
-            {"required", {"filePath", "oldString", "newString"}}}};
+            {"required", {"filePath", "oldString", "newString"}}}}, explained);
 }
 
 ToolResult EditTool::execute(const nlohmann::json& arguments, const ToolContext& context) const {
+    const auto explanation = fs_tools::explanation(arguments, explained);
     const auto params = arguments.get<EditArguments>();
     if (params.oldString == params.newString) throw std::invalid_argument("No changes: oldString and newString are identical");
     const auto path = fs_tools::resolve(context, params.filePath);
@@ -77,6 +78,6 @@ ToolResult EditTool::execute(const nlohmann::json& arguments, const ToolContext&
     fs_tools::checkpoint(context);
     if (std::filesystem::exists(path) != exists || (exists && fs_tools::readText(path) != before))
         throw std::runtime_error("File changed while awaiting permission: " + path.string());
-    fs_tools::mutate(context, {path}, [&] { fs_tools::writeText(path, after); });
+    fs_tools::mutate(context, {path}, [&] { fs_tools::writeText(path, after); }, explanation);
     return {fs_tools::relative(context, path), "Edit applied successfully.", {{"diff", diff}, {"filepath", path.string()}}, {}};
 }

@@ -1,6 +1,9 @@
 #include "agent.hpp"
 #include "tools/common/view_image.hpp"
 #include "tools/common/rerun_approved_action.hpp"
+#include "tools/fs/edit.hpp"
+#include "tools/fs/write.hpp"
+#include "tools/fs/apply_patch.hpp"
 #include "skills/project_instructions.hpp"
 
 #include <stdexcept>
@@ -363,6 +366,11 @@ void Agent::setSanePlanning(bool enabled, std::string plan, std::string stack) {
 void Agent::setImplementationExecution(bool enabled, std::function<nlohmann::json()> inspect, ImplementationProgressHandler progress) {
     std::lock_guard lock(mutex);
     if (running) throw std::logic_error("Cannot change execution tools while running");
+    for (const auto& definition : tools.getDefinitions()) {
+        if (definition.id == "edit") { tools.remove("edit"); tools.add(std::make_unique<EditTool>(enabled)); }
+        if (definition.id == "write") { tools.remove("write"); tools.add(std::make_unique<WriteTool>(enabled)); }
+        if (definition.id == "apply_patch") { tools.remove("apply_patch"); tools.add(std::make_unique<ApplyPatchTool>(enabled)); }
+    }
     tools.remove("inspect_implementation_changes");
     tools.remove("complete_implementation_step");
     tools.remove("report_implementation_progress");

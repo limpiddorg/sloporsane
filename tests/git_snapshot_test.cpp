@@ -207,6 +207,38 @@ TEST_F(GitSnapshotTest, ImplementationBoundariesPreserveGitIgnoredBinaryAndUserI
     EXPECT_EQ(read(".git/index"), index); EXPECT_EQ(read(".git/HEAD"), head);
 }
 
+TEST_F(GitSnapshotTest, ValidationCommandChangesCanBeRecoveredWithoutReassigningConstruction) {
+    write("model", "base\n");
+    git({"add", "model"});
+    const auto index = read(".git/index"), head = read(".git/HEAD");
+    const auto storage = directory / "validation-recovery"; fs::create_directory(storage);
+    TurnFiles files(storage); files.begin(files.prepare(repo, repo));
+    ImplementationBoundaries boundaries(storage);
+    boundaries.capture(0, 2, {0, "started", "Build model"}, files.boundary());
+    files.mutate({repo / "model"}, [&] { write("model", "built\n"); });
+    boundaries.capture(0, 2, {0, "completed", "Built"}, files.boundary());
+    boundaries.capture(0, 2, {1, "unnecessary", "No wiring"}, files.boundary());
+    boundaries.capture(0, 2, {{}, "validating", "Check"}, files.boundary());
+    bool executed = false;
+    EXPECT_THROW(files.mutate({}, [&] { executed = true; write("generated.txt", "test output\n"); },
+        [&](const auto& snapshot) { boundaries.capture(0, 2, {{}, "mutation", ""}, snapshot); }), std::logic_error);
+    EXPECT_TRUE(executed);
+    ASSERT_NO_THROW(boundaries.capture(0, 2, {1, "correcting", "Account for test output"}, files.boundary()));
+    boundaries.capture(0, 2, {1, "completed", "Checked output"}, files.boundary());
+    EXPECT_NO_THROW(files.mutate({}, [] {}, [&](const auto& snapshot) {
+        boundaries.capture(0, 2, {{}, "mutation", ""}, snapshot);
+    }));
+    boundaries.capture(0, 2, {{}, "finished", "Passed"}, files.boundary());
+    files.finish();
+    const auto owned = preserveImplementationOwnership(boundaries.read(0), files.diffs(files.boundary()), 2);
+    ASSERT_EQ(owned[0].size(), 1); ASSERT_EQ(owned[1].size(), 1);
+    EXPECT_EQ(owned[0][0].path, "model");
+    EXPECT_EQ(owned[0][0].before, "base\n"); EXPECT_EQ(owned[0][0].after, "built\n");
+    EXPECT_EQ(owned[1][0].path, "generated.txt");
+    EXPECT_EQ(owned[1][0].after, "test output\n");
+    EXPECT_EQ(read(".git/index"), index); EXPECT_EQ(read(".git/HEAD"), head);
+}
+
 TEST_F(GitSnapshotTest, LeavesUserIndexHeadAndConfigurationUntouched) {
     write("tracked", "committed");
     git({"add", "tracked"});

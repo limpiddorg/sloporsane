@@ -85,6 +85,7 @@ class SosApp(App[None]):
     TITLE = "sloporsane"
     BINDINGS = [Binding("ctrl+q", "quit", "Quit"),
                 Binding("slash", "implementation_slash", "Review commands", show=False, priority=True),
+                Binding("e,E", "implementation_explanation", "Diff explanation", show=False, priority=True),
                 Binding("ctrl+c", "clear_or_quit", "Clear or quit", show=False, priority=True),
                 Binding("ctrl+g", "edit_external", "Open editor", show=False, priority=True),
                 Binding("ctrl+t", "next_reasoning", "Next reasoning level", show=False, priority=True),
@@ -501,6 +502,9 @@ class SosApp(App[None]):
             return False
         if action == "implementation_slash":
             return inspecting and not isinstance(self.focused, MessageInput)
+        if action == "implementation_explanation":
+            return (inspecting and not self.implementation.discussion_preview and not workspace.chat_open
+                    and bool(workspace.zones) and not isinstance(self.focused, MessageInput))
         if action == "implementation_enter":
             return inspecting and not workspace.chat_open and not isinstance(self.focused, (Button, ActivityToggle, CollapsibleTitle))
         if action == "implementation_move":
@@ -569,6 +573,9 @@ class SosApp(App[None]):
 
     def action_implementation_slash(self) -> None:
         self.query_one(ImplementationWorkspace).open_review_command()
+
+    def action_implementation_explanation(self) -> None:
+        self.query_one(ImplementationWorkspace).toggle_diff_explanation()
 
     def action_tab_key(self, direction: int = 1) -> None:
         if self.implementation.discussion_preview:

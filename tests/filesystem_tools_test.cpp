@@ -60,6 +60,28 @@ TEST_F(FilesystemToolsTest, WritesParentsOverwritesAndPreservesBom) {
     EXPECT_NE(permissions[1].metadata["diff"].get<std::string>().find("+"), std::string::npos);
 }
 
+TEST_F(FilesystemToolsTest, ExplainedEditingToolsRequireTextBeforePermissionsAndCaptureItWithTheMutation) {
+    WriteTool write(true); EditTool edit(true); ApplyPatchTool patch(true);
+    for (const Tool* tool : std::vector<const Tool*>{&write, &edit, &patch}) {
+        const auto schema = tool->getDefinition().parameters;
+        EXPECT_NE(std::find(schema["required"].begin(), schema["required"].end(), "explanation"), schema["required"].end());
+        for (const auto& invalid : {json::object(), json{{"explanation", "  \n"}}, json{{"explanation", 42}}})
+            EXPECT_THROW(tool->execute(invalid, context), std::invalid_argument);
+    }
+    EXPECT_TRUE(permissions.empty());
+    std::vector<std::string> explanations;
+    context.mutateFiles = [&](const auto&, const auto& action, const auto& explanation) {
+        explanations.push_back(explanation); action();
+    };
+    write.execute({{"filePath", "file"}, {"content", "first\n"}, {"explanation", "Create the model"}}, context);
+    edit.execute({{"filePath", "file"}, {"oldString", "first"}, {"newString", "second"}, {"explanation", "Complete corrected model"}}, context);
+    patch.execute({{"patchText", "*** Begin Patch\n*** Update File: file\n@@\n-second\n+third\n*** End Patch"},
+        {"explanation", "Complete final model"}}, context);
+    EXPECT_EQ(explanations, (std::vector<std::string>{"Create the model", "Complete corrected model", "Complete final model"}));
+    EXPECT_EQ(get("file"), "third\n");
+    EXPECT_FALSE(WriteTool{}.getDefinition().parameters["properties"].contains("explanation"));
+}
+
 TEST_F(FilesystemToolsTest, EditRejectsAmbiguityAndSupportsReplaceAll) {
     put("file", "hello\nhello\n");
     EditTool tool;

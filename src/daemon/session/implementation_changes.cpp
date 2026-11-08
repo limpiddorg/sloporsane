@@ -9,7 +9,7 @@
 
 namespace {
 const std::regex HEADER(R"(^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@)");
-struct Hunk { std::size_t start, count; std::string replacement, patch; };
+struct Hunk { std::size_t start, count; std::string replacement, patch; std::size_t afterStart = 0, afterCount = 0; };
 std::vector<std::string> lines(const std::string& text) {
     std::vector<std::string> result;
     for (std::size_t start = 0; start < text.size();) {
@@ -27,7 +27,10 @@ std::vector<Hunk> hunks(const std::string& patch) {
         if (std::regex_search(line, match, HEADER)) {
             const auto count = match[2].matched ? std::stoull(match[2]) : 1;
             const auto start = std::stoull(match[1]);
-            result.push_back({count ? start - 1 : start, count, "", line}); previous = 0;
+            const auto afterCount = match[4].matched ? std::stoull(match[4]) : 1;
+            const auto afterStart = std::stoull(match[3]);
+            result.push_back({count ? start - 1 : start, count, "", line,
+                afterCount ? afterStart - 1 : afterStart, afterCount}); previous = 0;
         } else if (!result.empty()) {
             auto& hunk = result.back();
             if (line.starts_with("\\ No newline")) {
@@ -68,6 +71,7 @@ struct OwnedFile {
     std::optional<std::size_t> metadataOwner;
     bool opaque = false;
     std::uint64_t nextIdentity = 1;
+    std::set<std::uint64_t> touched;
 };
 std::string contents(const std::vector<OwnedLine>& source) {
     std::string result;
@@ -89,6 +93,7 @@ OwnedFile initialFile(const std::string& before) {
     return file;
 }
 void rememberChanges(OwnedFile& file, const ImplementationDiff& diff, std::size_t owner) {
+    file.touched.clear();
     if (diff.patch.find("GIT binary patch") != std::string::npos || diff.patch.find("Binary contents changed") != std::string::npos ||
         diff.patch.find("Non-UTF-8 contents changed") != std::string::npos) {
         file.opaque = true;
@@ -115,8 +120,10 @@ void rememberChanges(OwnedFile& file, const ImplementationDiff& diff, std::size_
             if (header) { header = false; continue; }
             if (line.starts_with("-")) {
                 const auto& removed = file.current.at(cursor++);
+                file.touched.insert(removed.identity);
                 if (removed.original) file.deleted[*removed.original] = owner;
             } else if (line.starts_with("+")) {
+                file.touched.insert(file.nextIdentity);
                 updated.push_back({after.at(updated.size()), {}, owner, file.nextIdentity++});
             } else if (line.starts_with(" ")) {
                 auto unchanged = file.current.at(cursor++);
@@ -198,6 +205,7 @@ std::vector<std::uint64_t> intermediateOrigins(std::size_t size, const std::vect
 struct OrderedHunk {
     std::set<std::uint64_t> origins;
     std::uint64_t order;
+    std::string explanation;
     bool overlaps(const OrderedHunk& other) const {
         return std::any_of(origins.begin(), origins.end(), [&](const auto identity) { return other.origins.contains(identity); });
     }
@@ -207,12 +215,14 @@ struct OrderedHunk {
 // by earlier substeps. Shifting line numbers must never reorder contributions.
 class ChangeChronology {
 public:
-    explicit ChangeChronology(std::size_t count) : histories(count), metadataOrders(count) {}
+    explicit ChangeChronology(std::size_t count) : histories(count), metadataOrders(count), metadataExplanations(count) {}
 
-    void observe(const OwnedFile& file, const ImplementationDiff& mutation) {
+    void observe(const OwnedFile& file, const ImplementationDiff& mutation, std::size_t owner) {
+        const auto explanation = mutation.hunkExplanations.empty() ? "" : mutation.hunkExplanations.front();
         if (file.metadataOwner) {
             auto& order = metadataOrders.at(*file.metadataOwner)[mutation.path];
             if (!order) order = next++;
+            if (!explanation.empty()) metadataExplanations.at(*file.metadataOwner)[mutation.path] = explanation;
         }
         if (file.opaque) return;
         const ImplementationDiff net{mutation.path, "", file.before, contents(file.current)};
@@ -222,8 +232,10 @@ public:
         auto origins = intermediateOrigins(originalSize, edits, {});
         for (std::size_t part = 0; part < histories.size(); ++part) {
             const auto current = intermediate(file.before, edits, part);
-            update(histories[part][mutation.path], fs_tools::diff(mutation.path, previous, current), origins);
-            origins = intermediateOrigins(originalSize, edits, part);
+            auto afterOrigins = intermediateOrigins(originalSize, edits, part);
+            update(histories[part][mutation.path], fs_tools::diff(mutation.path, previous, current), origins,
+                afterOrigins, file.touched, part == owner ? explanation : "");
+            origins = std::move(afterOrigins);
             previous = current;
         }
     }
@@ -239,15 +251,45 @@ public:
         return result;
     }
 
+    std::vector<std::string> explanations(std::size_t part, const std::string& path) const {
+        std::vector<std::string> result;
+        if (const auto found = histories.at(part).find(path); found != histories.at(part).end())
+            for (const auto& hunk : found->second) result.push_back(hunk.explanation);
+        if (result.empty()) {
+            const auto& metadata = metadataExplanations.at(part);
+            if (const auto found = metadata.find(path); found != metadata.end()) result.push_back(found->second);
+        }
+        return result;
+    }
+
 private:
     void update(std::vector<OrderedHunk>& previous, const std::string& patch,
-        const std::vector<std::uint64_t>& origins) {
+        const std::vector<std::uint64_t>& origins, const std::vector<std::uint64_t>& afterOrigins,
+        const std::set<std::uint64_t>& touched, const std::string& explanation) {
         std::vector<OrderedHunk> current;
         for (const auto& hunk : hunks(patch)) {
             OrderedHunk zone{{}, 0};
             for (auto line = hunk.start; line < hunk.start + hunk.count; ++line) zone.origins.insert(origins.at(line));
-            if (zone.origins.empty()) zone.origins.insert(0); // One all-added hunk in an empty source.
-            for (const auto& old : previous) if (zone.overlaps(old) && (!zone.order || old.order < zone.order)) zone.order = old.order;
+            if (zone.origins.empty()) zone.origins.insert(0); // Keep an all-added zone's position across full rewrites.
+            for (auto line = hunk.afterStart; line < hunk.afterStart + hunk.afterCount; ++line) zone.origins.insert(afterOrigins.at(line));
+            std::vector<std::string> explanations;
+            const auto append = [&](const std::string& text) {
+                if (!text.empty() && std::find(explanations.begin(), explanations.end(), text) == explanations.end()) explanations.push_back(text);
+            };
+            const auto changed = [&](const OrderedHunk& value) {
+                return std::any_of(value.origins.begin(), value.origins.end(), [&](auto identity) { return touched.contains(identity); });
+            };
+            for (const auto& old : previous) if (zone.overlaps(old)) {
+                if (!zone.order || old.order < zone.order) zone.order = old.order;
+                // A correction supplies a replacement synthesis for its old
+                // zone. Unaffected zones that merge retain their explanations.
+                append(!explanation.empty() && changed(old) ? explanation : old.explanation);
+            }
+            if (changed(zone)) append(explanation);
+            for (const auto& text : explanations) {
+                if (!zone.explanation.empty()) zone.explanation += '\n';
+                zone.explanation += text;
+            }
             if (!zone.order) zone.order = next++;
             current.push_back(zone);
         }
@@ -257,6 +299,7 @@ private:
     std::uint64_t next = 1;
     std::vector<std::map<std::string, std::vector<OrderedHunk>>> histories;
     std::vector<std::map<std::string, std::uint64_t>> metadataOrders;
+    std::vector<std::map<std::string, std::string>> metadataExplanations;
 };
 }
 
@@ -269,7 +312,7 @@ std::vector<std::vector<ImplementationDiff>> preserveImplementationOwnership(
         if (!boundary.owner || *boundary.owner >= count) throw std::runtime_error("Captured change has no valid substep owner");
         auto [entry, inserted] = files.try_emplace(diff.path, initialFile(diff.before));
         rememberChanges(entry->second, diff, *boundary.owner);
-        chronology.observe(entry->second, diff);
+        chronology.observe(entry->second, diff, *boundary.owner);
     }
     std::vector<std::vector<ImplementationDiff>> result(count);
     for (const auto& diff : finalDiffs) {
@@ -278,6 +321,7 @@ std::vector<std::vector<ImplementationDiff>> preserveImplementationOwnership(
         if (file.opaque) {
             result.at(*file.metadataOwner).push_back(diff);
             result.at(*file.metadataOwner).back().hunkOrder = chronology.orders(*file.metadataOwner, diff.path);
+            result.at(*file.metadataOwner).back().hunkExplanations = chronology.explanations(*file.metadataOwner, diff.path);
             continue;
         }
         if (file.before != diff.before || contents(file.current) != diff.after)
@@ -288,6 +332,7 @@ std::vector<std::vector<ImplementationDiff>> preserveImplementationOwnership(
             if (!file.metadataOwner) throw std::runtime_error("File metadata change has no construction owner");
             result.at(*file.metadataOwner).push_back(diff);
             result.at(*file.metadataOwner).back().hunkOrder = chronology.orders(*file.metadataOwner, diff.path);
+            result.at(*file.metadataOwner).back().hunkExplanations = chronology.explanations(*file.metadataOwner, diff.path);
             continue;
         }
         std::string previous = diff.before;
@@ -297,6 +342,7 @@ std::vector<std::vector<ImplementationDiff>> preserveImplementationOwnership(
             if (current == previous && !ownsMetadata) continue;
             result[part].push_back({diff.path, fs_tools::diff(diff.path, previous, current) + (ownsMetadata ? extra : ""), previous, current});
             result[part].back().hunkOrder = chronology.orders(part, diff.path);
+            result[part].back().hunkExplanations = chronology.explanations(part, diff.path);
             previous = current;
         }
         if (previous != diff.after) throw std::runtime_error("Corrected substeps do not reproduce the final file");
