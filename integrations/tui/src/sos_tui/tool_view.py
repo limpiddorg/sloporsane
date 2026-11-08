@@ -20,6 +20,7 @@ from .patch_diff import patch_widgets
 from .code_colors import highlighted_lines
 from .tool_file_paths import FILE_TOOLS, ToolPathTitle, append_title_path, file_path, file_result, tool_files
 from .workspace_path import WorkspacePath
+from .turn_activity import ProcessWaiting
 
 
 def plain(value: Any) -> str:
@@ -102,8 +103,9 @@ def format_arguments(arguments: dict[str, Any], tool: str | None = None,
         text.append("\n")
         text.append(str(arguments.get("pattern", "")), style=MISC_MD)
         return text
-    if tool == "bash":
-        arguments = {"command": arguments.get("command", ""), "timeout": f"{arguments.get('timeout', 120000)} ms",
+    if tool in ("bash", "wait"):
+        default_timeout = 3600000 if tool == "wait" else 120000
+        arguments = {"command": arguments.get("command", ""), "timeout": f"{arguments.get('timeout', default_timeout)} ms",
                      **({"workdir": arguments["workdir"]} if "workdir" in arguments else {})}
     text = Text()
     for index, (name, value) in enumerate(arguments.items()):
@@ -178,7 +180,7 @@ def result_widgets(tool: str, arguments: dict[str, Any], result: dict[str, Any])
             widgets.append(Static(Text(f"{display.get('totalEntries', '?')} entries", style="dim")))
         else:
             widgets.append(Static(Text(output)))
-    elif tool == "bash":
+    elif tool in ("bash", "wait"):
         # The same status is presented separately using structured metadata.
         if "exit" in metadata:
             output = re.sub(r"\n\n<shell_metadata>\n.*?</shell_metadata>$", "", output, flags=re.DOTALL)
@@ -284,7 +286,7 @@ class ToolView(ChatCollapsible):
         if result_only:
             arguments_widgets = []
             result_widgets_header = []
-        elif tool in ("bash", "grep", "glob", "skill"):
+        elif tool in ("bash", "wait", "grep", "glob", "skill"):
             arguments_widgets = [self.arguments_view]
         self.call_headers = [*arguments_widgets, *result_widgets_header]
         super().__init__(
@@ -294,7 +296,7 @@ class ToolView(ChatCollapsible):
             title=self.base_title, collapsed=True, collapsed_symbol="▸", expanded_symbol="▾",
             classes="tool-call skill-call" if self.activity_kind == "skill" else "tool-call",
         )
-        if tool in FILE_TOOLS or tool in ("bash", "grep", "glob", "rerun_approved_action"):
+        if tool in FILE_TOOLS or tool in ("bash", "wait", "grep", "glob", "rerun_approved_action"):
             self._title = ToolPathTitle(self)
         self.update_file_layout()
 
@@ -307,6 +309,10 @@ class ToolView(ChatCollapsible):
 
     def on_mount(self) -> None:
         super().on_mount()
+        if self.tool == "wait" and self.result is None:
+            status = self.arguments.get("status")
+            self.post_message(ProcessWaiting(self.call_id, True,
+                                            status if isinstance(status, str) else "Waiting for process completion"))
         if self.multi_file:
             self.request_file_sync()
 
@@ -316,7 +322,7 @@ class ToolView(ChatCollapsible):
         return file_path(files[index]) if index < len(files) and (self.file_index is not None or len(files) == 1) else ""
 
     def title_text(self, width: int | None = None) -> Text:
-        if self.tool == "bash":
+        if self.tool in ("bash", "wait"):
             return self.bash_title_text(width)
         text = styled_tool_title(self.authorized_title(), self.permissions)
         if self.tool in ("grep", "glob"):
@@ -425,6 +431,8 @@ class ToolView(ChatCollapsible):
 
     def set_result(self, result: dict[str, Any]) -> None:
         self.result = result
+        if self.tool == "wait" and self.is_mounted:
+            self.post_message(ProcessWaiting(self.call_id, False))
         self.rendered = False
         metadata = result.get("metadata") or {}
         self.update_mcp_identity(metadata.get("mcp_server"), metadata.get("mcp_tool"))
@@ -436,9 +444,9 @@ class ToolView(ChatCollapsible):
                     self.arguments_view.update(format_arguments(self.arguments, self.tool))
         if self.tool == "skill" and self.arguments_rendered:
             self.arguments_view.update(format_arguments(self.arguments, self.tool, metadata))
-        command_returned = (self.tool == "bash" and type(metadata.get("exit")) is int
+        command_returned = (self.tool in ("bash", "wait") and type(metadata.get("exit")) is int
                             and not metadata.get("timedOut") and not metadata.get("cancelled"))
-        failed = (result["isError"] and not command_returned) or (self.tool == "bash" and metadata.get("timedOut"))
+        failed = (result["isError"] and not command_returned) or (self.tool in ("bash", "wait") and metadata.get("timedOut"))
         self.set_class(self.activity_kind == "skill", "skill-call")
         self.base_title = self.status_title('Failed' if failed else 'Completed')
         if metadata.get("cancelled"):

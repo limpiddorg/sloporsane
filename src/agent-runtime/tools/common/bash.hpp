@@ -18,4 +18,10 @@ public:
     ToolResult execute(const nlohmann::json& arguments, const ToolContext& context) const override;
 };
 
+class WaitTool : public BashTool {
+public:
+    ToolDefinition getDefinition() const override;
+    ToolResult execute(const nlohmann::json& arguments, const ToolContext& context) const override;
+};
+
 #endif // SOS_BASH_TOOL_HPP

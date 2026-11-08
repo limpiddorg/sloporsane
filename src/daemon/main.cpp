@@ -84,6 +84,7 @@ std::unique_ptr<Agent> createAgent(const SessionInfo& info, const ProviderConnec
     tools.add(std::make_unique<EditTool>());
     tools.add(std::make_unique<ApplyPatchTool>());
     tools.add(std::make_unique<BashTool>());
+    tools.add(std::make_unique<WaitTool>());
     tools.add(std::make_unique<WebFetchTool>());
     ToolContext context{info.executionDirectory(), info.executionDirectory()};
     context.ask = [](const ToolPermissionRequest&) {

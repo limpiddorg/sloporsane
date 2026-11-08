@@ -111,6 +111,19 @@ TEST(SessionHistoryViewTest, LastGroupIsPreloadedWholeEvenAboveTheFormerActivity
     EXPECT_EQ(view.activities(history, "m0/activity/0")["activities"].size(), 51);
 }
 
+TEST(SessionHistoryViewTest, WaitKeepsCommandLabelInLightweightHistoryWithoutCommandBody) {
+    std::vector<Message> history{text(0)};
+    history.push_back({"watch", MessageRole::ASSISTANT,
+        {ToolCallContent{"wait-call", "wait", nlohmann::json{{"command", "gh run watch 123 --exit-status"},
+            {"mainCommand", "gh"}, {"status", "Monitoring CI completion"}, {"timeout", 3600000}}}}});
+    SessionHistoryView view;
+    view.update(history);
+    const auto items = view.activities(history, "m0/activity/0")["activities"];
+    ASSERT_EQ(items.size(), 1);
+    EXPECT_EQ(items[0]["toolName"], "wait");
+    EXPECT_EQ(items[0]["arguments"], nlohmann::json({{"mainCommand", "gh"}, {"status", "Monitoring CI completion"}}));
+}
+
 TEST(SessionHistoryViewTest, IncrementalResultsAndMixedMessagesDoNotDuplicateActivities) {
     std::vector<Message> history{text(0)};
     history.push_back({"mixed", MessageRole::ASSISTANT,
