@@ -170,6 +170,73 @@ TEST_F(CommonToolsTest, BashRequiresMainCommandButNeverUsesItForExecutionOrPermi
     EXPECT_EQ(permissions.back().readOnly, expected.readOnly);
 }
 
+TEST_F(CommonToolsTest, WaitReturnsOnlyAfterExitDespiteIntermediateOutput) {
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = WaitTool{}.execute({{"command", "printf 'running\\n'; sleep .2; printf done; exit 7"},
+        {"mainCommand", "monitor"}, {"status", "Monitoring CI completion"}}, context);
+    EXPECT_GE(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(150));
+    EXPECT_NE(result.output.find("running\ndone"), std::string::npos);
+    EXPECT_EQ(result.metadata["exit"], 7);
+    EXPECT_FALSE(result.metadata["timedOut"]);
+    EXPECT_EQ(permissions.front().permission, "bash");
+    EXPECT_EQ(permissions.front().metadata["timeout"], 3600000);
+    EXPECT_EQ(WaitTool{}.getDefinition().id, "wait");
+    const auto schema = WaitTool{}.getDefinition().parameters;
+    EXPECT_EQ(schema["properties"]["status"]["maxLength"], 80);
+    EXPECT_NE(std::find(schema["required"].begin(), schema["required"].end(), "status"), schema["required"].end());
+}
+
+TEST_F(CommonToolsTest, WaitValidatesStatusBeforeExecutionAndLabelDoesNotAffectPermissions) {
+    for (const auto& status : {json(""), json(" \t"), json("one two three four five six"), json("line\nbreak"),
+            json(std::string(81, 'x')), json(42), json(nullptr)}) {
+        EXPECT_THROW(WaitTool{}.execute({{"command", "touch should-not-run"}, {"mainCommand", "touch"},
+            {"status", status}}, context), std::exception);
+    }
+    EXPECT_THROW(WaitTool{}.execute({{"command", "touch should-not-run"}, {"mainCommand", "touch"}}, context), std::exception);
+    EXPECT_FALSE(fs::exists(directory / "should-not-run"));
+    EXPECT_TRUE(permissions.empty());
+    WaitTool{}.execute({{"command", "true"}, {"mainCommand", "true"}, {"status", "Waiting for CI completion"}}, context);
+    const auto expected = permissions.back();
+    WaitTool{}.execute({{"command", "true"}, {"mainCommand", "true"}, {"status", "Monitoring deployment progress"}}, context);
+    EXPECT_EQ(permissions.back().metadata, expected.metadata);
+    EXPECT_EQ(permissions.back().patterns, expected.patterns);
+}
+
+TEST_F(CommonToolsTest, WaitHandlesTimeoutCancellationDenialAndInvalidArguments) {
+    const auto result = WaitTool{}.execute({{"command", "printf ready; sleep 10"}, {"mainCommand", "monitor"}, {"status", "Monitoring CI completion"},
+        {"timeout", 50}}, context);
+    EXPECT_TRUE(result.metadata["timedOut"]);
+    EXPECT_TRUE(result.metadata["exit"].is_null());
+    EXPECT_NE(result.output.find("ready"), std::string::npos);
+    EXPECT_EQ(permissions.front().metadata["timeout"], 50);
+    EXPECT_THROW(WaitTool{}.execute({{"command", "true"}, {"mainCommand", "monitor"}, {"status", "Monitoring CI completion"}, {"timeout", 0}}, context), std::invalid_argument);
+    int checks = 0;
+    context.checkCancelled = [&] { if (++checks > 3) throw std::runtime_error("Cancelled"); };
+    EXPECT_THROW(WaitTool{}.execute({{"command", "sleep 10"}, {"mainCommand", "monitor"}, {"status", "Monitoring CI completion"}}, context), std::runtime_error);
+    context.checkCancelled = {};
+    context.ask = [](const auto&) { throw std::runtime_error("Denied"); };
+    EXPECT_THROW(WaitTool{}.execute({{"command", "touch should-not-exist"}, {"mainCommand", "monitor"}, {"status", "Monitoring CI completion"}}, context), std::runtime_error);
+    EXPECT_FALSE(fs::exists(directory / "should-not-exist"));
+}
+
+TEST_F(CommonToolsTest, WaitUsesBashAnalysisAndSpoolsLargeOutput) {
+    const json args{{"command", "for ((i=0;i<2100;i++)); do printf 'line-%s\\n' \"$i\"; done"}, {"mainCommand", "monitor"}, {"status", "Monitoring CI completion"}, {"timeout", 10000}};
+    const auto result = WaitTool{}.execute(args, context);
+    const auto waitPermissions = permissions;
+    permissions.clear();
+    BashTool{}.execute(args, context);
+    ASSERT_EQ(waitPermissions.size(), permissions.size());
+    for (std::size_t i = 0; i < permissions.size(); ++i) {
+        EXPECT_EQ(waitPermissions[i].permission, permissions[i].permission);
+        EXPECT_EQ(waitPermissions[i].patterns, permissions[i].patterns);
+        EXPECT_EQ(waitPermissions[i].readOnly, permissions[i].readOnly);
+    }
+    EXPECT_TRUE(result.metadata["truncated"]);
+    const auto complete = fs_tools::readText(result.metadata["outputPath"].get<std::string>());
+    EXPECT_TRUE(complete.starts_with("line-0\n"));
+    EXPECT_TRUE(complete.ends_with("line-2099\n"));
+}
+
 TEST_F(CommonToolsTest, WebfetchConvertsHtmlToMarkdownTextOrRawHtml) {
     const std::string html = "<html><head><style>HIDDEN</style></head><body><h1>Title &amp; stuff</h1>"
         "<p>Hello <strong>world</strong> <a href='/docs'>docs</a></p><script>SECRET</script>"

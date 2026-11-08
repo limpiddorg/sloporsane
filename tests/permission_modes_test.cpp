@@ -68,6 +68,23 @@ TEST_F(PermissionModesTest, ImplementationExecutionAllowsWritesWithoutChangingSa
     EXPECT_THROW(manager.ask(edit(), [] {}), std::runtime_error);
 }
 
+TEST_F(PermissionModesTest, WaitNeverBypassesSaneOrReviewRestrictions) {
+    PermissionManager manager([](auto) { ADD_FAILURE() << "Unexpected prompt"; });
+    manager.configure(directory, ExecutionMode::SANE);
+    manager.setPermissionMode(PermissionMode::DANGER);
+    auto shell = ToolPermissionRequest{"bash", {}, {}, {}, "w", "wait", false};
+    auto external = ToolPermissionRequest{"external_directory", {}, {}, {{"parentDir", "/"}}, "w", "wait", false};
+    EXPECT_THROW(manager.ask(shell, [] {}), std::runtime_error);
+    EXPECT_THROW(manager.ask(external, [] {}), std::runtime_error);
+    shell.readOnly = true;
+    EXPECT_EQ(manager.ask(shell, [] {}).decision, PermissionDecision::ALLOW);
+    manager.setMode(ExecutionMode::SLOP);
+    manager.setImplementationPhase(ImplementationPhase::REVIEW);
+    shell.readOnly = false;
+    EXPECT_THROW(manager.ask(shell, [] {}), std::runtime_error);
+    EXPECT_THROW(manager.ask(external, [] {}), std::runtime_error);
+}
+
 TEST_F(PermissionModesTest, ImplementationAutoAcceptanceContinuesWithoutHumanPrompt) {
     PermissionManager manager([](auto event) {
         EXPECT_EQ(event.type, PermissionEventType::RESOLVED);

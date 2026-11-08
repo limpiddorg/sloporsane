@@ -177,8 +177,10 @@ nlohmann::json SessionHistoryView::fileArguments(const std::string& tool, const 
     if (!arguments.is_object()) return result;
     if ((tool == "grep" || tool == "glob") && arguments.contains("pattern") && arguments.at("pattern").is_string())
         result["pattern"] = arguments.at("pattern");
-    if (tool == "bash" && arguments.contains("mainCommand") && arguments.at("mainCommand").is_string())
+    if ((tool == "bash" || tool == "wait") && arguments.contains("mainCommand") && arguments.at("mainCommand").is_string())
         result["mainCommand"] = arguments.at("mainCommand");
+    if (tool == "wait" && arguments.contains("status") && arguments.at("status").is_string())
+        result["status"] = arguments.at("status");
     if ((tool == "write" || tool == "edit") && arguments.contains("filePath") && arguments.at("filePath").is_string())
         result["filePath"] = arguments.at("filePath");
     if (tool != "apply_patch") return result;

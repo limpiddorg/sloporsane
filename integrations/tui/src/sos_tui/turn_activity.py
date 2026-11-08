@@ -5,13 +5,23 @@ from time import monotonic
 from typing import Any
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.color import Color
 from textual.containers import Vertical
 from textual.events import Click
 from textual.message import Message
+from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Collapsible, Rule, Static
 
 from .config import ALGAE_MD, BOLD_MD, MISC_MD, MUTED_COLOR, SLOP_COLOR, TITLE_MD
+
+
+class ProcessWaiting(Message):
+    def __init__(self, call_id: str, waiting: bool, status: str = "Waiting for process completion") -> None:
+        super().__init__()
+        self.call_id = call_id
+        self.waiting = waiting
+        self.status = status
 
 
 def reasoning_label(effort: str | None) -> str:
@@ -57,6 +67,58 @@ class ActivityToggle(Static, can_focus=True):
         self.output_tokens: int | None = 0
         self.model_call_count = 0
         self.step_count = 0
+        self.waiting_processes: set[str] = set()
+        self.waiting_labels: dict[str, str] = {}
+        self.wait_status = Static("", classes="process-wait-status", markup=False)
+        self.wait_status.display = False
+        self.wait_started = 0.0
+        self.wait_timer: Timer | None = None
+
+    def on_mount(self) -> None:
+        self.update_wait_animation()
+
+    def set_process_waiting(self, call_id: str, waiting: bool, status: str = "Waiting for process completion") -> None:
+        was_waiting = bool(self.waiting_processes)
+        if waiting:
+            self.waiting_processes.add(call_id)
+            self.waiting_labels[call_id] = " ".join(status.split()[:5]).rstrip(". …") or "Waiting for process completion"
+        else:
+            self.waiting_processes.discard(call_id)
+            self.waiting_labels.pop(call_id, None)
+        if not was_waiting and self.waiting_processes:
+            self.wait_started = monotonic()
+        self.update_wait_animation()
+        self.refresh()
+
+    def update_wait_animation(self) -> None:
+        active = bool(self.waiting_processes) and self.started_at is not None and self.is_terminal
+        if active and self.is_mounted and self.wait_timer is None:
+            self.wait_timer = self.set_interval(1 / 20, self.refresh_wait_status, pause=True)
+        self.wait_status.display = active
+        if active:
+            self.refresh_wait_status()
+        if self.wait_timer is not None:
+            if active:
+                self.wait_timer.resume()
+            else:
+                self.wait_timer.pause()
+
+    def refresh_wait_status(self) -> None:
+        self.wait_status.update(self.waiting_label())
+
+    def waiting_label(self) -> Text:
+        elapsed = max(0.0, monotonic() - self.wait_started)
+        label = next(iter(self.waiting_labels.values()), "Waiting for process completion")
+        text = Text(label, style=MUTED_COLOR)
+        # A soft, one-way highlight changes foreground only, never the dots or background.
+        center = (elapsed % 3.5) / 3.5 * (len(label) + 8) - 4
+        base = Color.parse(MUTED_COLOR)
+        for index in range(len(label)):
+            strength = max(0.0, 1 - abs(index - center) / 4) * .9
+            if strength:
+                text.stylize(base.blend(Color.parse("#ffffff"), strength).hex, index, index + 1)
+        text.append(("." * (int(elapsed / .5) % 3 + 1)).ljust(3), style=MUTED_COLOR)
+        return text
 
     def render(self) -> Text:
         text = Text(f"{'▾' if self.expanded else '▸'} Activity")
@@ -105,6 +167,7 @@ class ActivityToggle(Static, can_focus=True):
 
     def start_generation(self, info: dict[str, Any], started_at: float) -> None:
         self.started_at = started_at
+        self.update_wait_animation()
         self.duration_ms = None
         self.model = info.get("model", "—")
         self.reasoning = info.get("reasoning", "—")
@@ -152,6 +215,9 @@ class ActivityToggle(Static, can_focus=True):
         elif self.started_at is not None:
             self.duration_ms = int((monotonic() - self.started_at) * 1000)
         self.started_at = None
+        self.waiting_processes.clear()
+        self.waiting_labels.clear()
+        self.update_wait_animation()
         self.update_elapsed()
         self.refresh()
 
@@ -173,6 +239,7 @@ class TurnActivity(Vertical):
     TurnActivity { height: auto; margin: 0; padding: 0; }
     TurnActivity > .activity-separator { height: 1; margin: 0; color: $muted; }
     TurnActivity > .activity-content { height: auto; margin: 0 1 0 3; padding: 0 0 0 2; }
+    TurnActivity > .process-wait-status { height: 1; margin: 0 1 0 5; padding: 0; color: $muted; }
     TurnActivity > .manual-refusals { height: auto; margin: 0 1 0 3; padding: 0 2 0 2; }
     TurnActivity > .refusals-heading, TurnActivity > .history-heading { height: 1; margin: 0 1 0 3; padding: 0 5 0 2; text-style: bold; }
     TurnActivity > Rule.approval-separator.-horizontal { height: 1; margin: 0 0 0 5; color: $muted; }
@@ -208,6 +275,7 @@ class TurnActivity(Vertical):
         yield self.separator
         yield self.history_heading
         yield self.body
+        yield self.toggle.wait_status
 
     def on_mount(self) -> None:
         if self.refused_views and not self.refusals.children:
@@ -223,6 +291,10 @@ class TurnActivity(Vertical):
             self.body.mount(widget)
         else:
             self.pending.append(widget)
+
+    def on_process_waiting(self, event: ProcessWaiting) -> None:
+        event.stop()
+        self.toggle.set_process_waiting(event.call_id, event.waiting, event.status)
 
     def add_refusal(self, widget: Widget) -> None:
         self.toggle.record_activity("refused")

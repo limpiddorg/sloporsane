@@ -90,7 +90,8 @@ bool PermissionManager::forbidden(const ToolPermissionRequest& request) const {
     return readOnly && (editTool(request.toolName) || request.permission == "edit" ||
         ((request.permission == "worktree" || request.permission == "workspace") && !request.readOnly && implementationPhase == ImplementationPhase::REVIEW) ||
         (request.permission == "mcp" && !request.readOnly) ||
-        ((request.permission == "bash" || (request.permission == "external_directory" && request.toolName == "bash")) && !request.readOnly));
+        ((request.permission == "bash" || (request.permission == "external_directory" &&
+            (request.toolName == "bash" || request.toolName == "wait"))) && !request.readOnly));
 }
 
 void PermissionManager::requireAllowed(const ToolPermissionRequest& request) const {

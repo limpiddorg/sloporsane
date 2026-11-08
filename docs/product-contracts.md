@@ -45,6 +45,19 @@ Les interactions TUI décrites ici visent Python/Textual, pas une obligation de 
 
 ## Interactions Textual
 
+- L'outil `wait` attend la fin d'une opération extérieure via une commande de surveillance,
+  avec les mêmes permissions que `bash`. Tests, builds et installations restent dans `bash`,
+  quelle que soit leur durée. Sans commande d'attente native, le modèle fournit un polling
+  borné avec conditions explicites de succès/échec. Les sorties intermédiaires ne relancent
+  pas le modèle ; fin du processus, timeout ou annulation rendent la main. Le timeout par
+  défaut est d'une heure. Arrêter le watcher local n'annule pas l'opération distante.
+- Pendant un appel `wait` actif, Activity garde son spinner et affiche une ligne de statut
+  dessous, après le contenu quand le drawer est ouvert, alignée sur le A d'Activity.
+  Le modèle fournit `status`, une phrase de cinq mots maximum (de préférence quatre ou cinq),
+  souvent `Waiting…`, mais sans préfixe imposé, ni points finaux. `.`, `..`, `...` bouclent
+  dans un espace stable. Un reflet lent nettement blanc traverse uniquement le texte de
+  gauche à droite, sans éclairer les points ni le fond.
+  Arrêter l'animation au résultat ou à l'interruption ; ne pas l'animer dans l'historique terminé.
 - Les titres d'outils ne sont pas en gras. Pour bash, afficher `mainCommand` en gris entre
   statut et exit code éventuel ; ce libellé descriptif ne change ni exécution ni permissions.
   Préserver libellés et patterns grep/glob dans les résumés légers, sans lire les anciens bodies.

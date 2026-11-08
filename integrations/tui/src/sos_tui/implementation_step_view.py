@@ -55,6 +55,12 @@ class SubstepActivity(TurnActivity):
             if message.get("model_call"):
                 self.toggle.record_model_call(message["model_call"])
             for part in message["content"]:
+                if part["type"] == "tool_call" and part["toolName"] == "wait":
+                    status = part["arguments"].get("status")
+                    self.toggle.set_process_waiting(part["callId"], True,
+                                                   status if isinstance(status, str) else "Waiting for process completion")
+                elif part["type"] == "tool_result":
+                    self.toggle.set_process_waiting(part["callId"], False)
                 kind = self.part_kind(part)
                 if kind is not None:
                     self.toggle.step_count += 1
