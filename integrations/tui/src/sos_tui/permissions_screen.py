@@ -101,6 +101,7 @@ class PermissionsScreen(DialogScreen):
                 yield Rule(line_style="solid", classes="popup-separator")
                 yield OptionList(*self.mode_options(), id="permissions-list", classes="popup-list")
             with Vertical(id="permissions-confidence"):
+                yield Static("An AI checks whether a command can run safely.", id="ai-check-description", markup=False)
                 yield Static("", id="permissions-model", markup=False)
                 yield Static("Minimum allow probability", id="confidence-heading", classes="popup-section")
                 with Horizontal(id="confidence-row"):

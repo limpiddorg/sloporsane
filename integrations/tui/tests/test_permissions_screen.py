@@ -83,6 +83,10 @@ class PermissionsScreenTest(unittest.IsolatedAsyncioTestCase):
         field = await self.tune()
         self.assertEqual(self.screen.current, "ask")
         self.assertTrue(self.screen.query_one("#permissions-confidence").display)
+        description = self.screen.query_one("#ai-check-description", Static)
+        self.assertEqual(str(description.content), "An AI checks whether a command can run safely.")
+        self.assertGreater(description.region.height, 0)
+        self.assertLessEqual(description.region.bottom, self.screen.query_one("#permissions-model").region.y)
         self.assertEqual(str(self.screen.query_one("#permissions-model", Static).content),
                          "API: TypeSafe\nModel: typesafe/jev-1.13")
         self.assertFalse(self.screen.query("#confidence-description"))
@@ -129,6 +133,7 @@ class PermissionsScreenTest(unittest.IsolatedAsyncioTestCase):
         self.screen.update_model_label()
         await self.tune()
         self.assertFalse(self.screen.query_one("#permissions-model").display)
+        self.assertGreater(self.screen.query_one("#ai-check-description").region.height, 0)
         self.assertEqual(str(self.screen.query_one("#permissions-model", Static).content), "")
         self.assertIs(self.app.screen, self.screen)
         await self.pilot.press("enter")
