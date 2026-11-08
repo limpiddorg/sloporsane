@@ -57,6 +57,7 @@ struct IntegrationRequest {
     PermissionMode permissionMode = PermissionMode::ASK;
     std::string permissionKey;
     std::optional<int> permissionConfidence;
+    std::optional<PermissionVerifierConfig> permissionModel;
     std::string refusedMessageId;
     bool manuallyApproved = false;
     PermissionDecision decision = PermissionDecision::NO;

@@ -58,6 +58,10 @@ public:
     void set(const std::string& provider, const ProviderCredential& credential);
     std::string permissionKey() const;
     void setPermissionKey(const std::string& key);
+    // Immutable revisions let settings activate a credential only after their atomic write.
+    std::string stagePermissionKey(const std::string& protocol, const std::string& endpoint, const std::string& key);
+    std::string permissionKey(const std::string& protocol, const std::string& endpoint,
+        const std::string& revision) const;
     std::mutex refreshMutex;
 private:
     std::filesystem::path path;

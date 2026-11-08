@@ -435,11 +435,11 @@ Branch metadata includes required `standalone` and `pageAnchor` fields in its JS
 body. Missing placement fields are rejected rather than inferred from `anchor`.
 Update daemon and TUI together.
 
-Jev confidence and exact manual replay extend version 7 with optional metadata;
-Those additions retain schema 5. Runtime `info.permission_confidence` advertises support
-for confidence tuning. The Textual picker refuses to configure Auto on an older
-daemon lacking this field, rather than letting an old daemon silently ignore the
-requested threshold. Older clients may omit the threshold and retain its saved value.
+AI Check and exact manual replay extend version 7 with optional metadata.
+The model configuration contract is advertised by `info.permission_check_version: 1`;
+Textual requires it before editing AI Check to avoid silent partial saves with an
+older daemon. Older clients may omit model/threshold fields and retain saved values.
+The wire field `confidence` is retained, but new checks use allow probability.
 
 Undo/redo adds `session.undo` and `session.redo` to protocol 7 and upgrades SQLite
 to schema 6 (`undo_turns`). Rebuild the daemon and Textual integration together;
@@ -897,48 +897,74 @@ This policy is independent of the `sane` / `slop` execution mode:
 {"type":"permissions.selected","requestId":"permissions-2","mode":"auto","confidence":80}
 ```
 
-`mode` is `ask`, `auto` or `danger`; other values are rejected. Selection applies
-during execution to subsequent permission checks. A pending Ask prompt is dismissed
-and reevaluated when switching to Auto or Danger, without cancelling the turn.
-An already running tool is not undone. The key is used only for `auto`, is
-validated before being stored, and is never echoed. An omitted/empty key reuses
-the saved dedicated key; without one, Auto selection fails unless confidence is 0. Errors use
-`request.failed` and preserve the previous mode. `permissions.get` returns only
-key availability, never the credential. Normal runtime `info` includes
-`permission_mode`, `permission_confidence` and `has_permission_key`.
-Selecting Auto in the TUI immediately reuses the saved key when available. Without
-one, it prompts for a masked key with `Cancel` to return without changing the policy.
-`Change API key` opens the same form for replacement; no Use saved key button is shown.
-A failed saved-key selection shows the form and error while preserving the current mode.
-After successful key selection it returns to the mode list, keeping the popup
-open. A short, borderless, single-line confidence field appears directly below
-the three modes only while Jev is both `Current` and highlighted; highlighting Auto
-alone does not show it. Highlighting Ask or Danger hides the field and its buttons.
-Only the 0% and 100% explanations sit to its right; there are no presets.
-Threshold Save (or Enter in the field) closes the popup only after a successful
-acknowledgement; failures leave the draft and error visible. `Change API key` reopens
-the key form. There is no Skip Jev button; 0 remains a valid field value with a
-warning before Save. Cancelling the key form never saves its draft; closing the
-mode list discards an unsaved threshold without undoing an acknowledged connection.
+`mode` remains `ask`, `auto` or `danger` on the wire; Textual displays **AI Check**
+without the old `(auto)` suffix. This policy is independent of Sane/Slop.
+Selection applies to subsequent permission checks, dismissing and reevaluating a
+pending Ask prompt without cancelling the turn. An already running tool is not undone.
 
-`confidence` is an optional integer from 0 through 100, defaulting to the saved
-`permission_confidence` in config.json (80 if absent). It is independent of the
-selected mode, model and session. Jev's `allow` confidence is the run score;
-`deny` confidence is inverted: a 98% denial becomes 2% confidence to run.
-The score is normalized to twelve decimal places to eliminate subtraction noise
-at integer threshold boundaries. For thresholds 1–100, an action passes exactly
-when its run score reaches the threshold. A low-confidence `deny` can therefore
-pass a low threshold. At 0, Jev is not called and actions pass as in Danger,
-subject to Sane and OS restrictions. At 100, the score must be 100%; this is not
-a calibrated safety guarantee. Invalid/missing scores and verifier failures
-fail closed whenever checks are enabled.
+Runtime `info.permission_check_version: 1` advertises configurable decision models
+and allow-probability thresholds. Textual refuses AI Check configuration without
+this capability, even if an older daemon advertises `permission_confidence`.
+`info.permission_model` and `permissions.current.model_config` contain `protocol`,
+`endpoint`, `model` and `has_key`. The key itself is never returned.
+
+```json
+{"type":"permissions.select","requestId":"save-check","mode":"auto","confidence":95,"check_version":1,"model_config":{"protocol":"openai_decisions","endpoint":"https://api.openai.com/v1/decisions","model":"gpt-6-luna"},"key":"<dedicated API key>"}
+```
+
+`model_config` in a selection contains exactly `protocol`, `endpoint`, and `model`.
+It requires `check_version: 1`; do not send the read-only `has_key` field back.
+`protocol` is `openai_decisions` or `typesafe`. Endpoints are complete URLs;
+HTTPS is required except HTTP on loopback. URL credentials and fragments are rejected.
+Model IDs are configurable, not a hard-coded catalog. TypeSafe's official endpoint
+is `https://api.typesafe.ai/v1/systemone`. Each service must support its selected
+protocol and model. New explicit configurations validate key syntax locally;
+they do not make a paid decision request on Save. Legacy clients supplying only
+an OpenRouter key retain their existing OpenRouter validation.
+
+The historical `permission_verifier` credential maps only to protocol `typesafe`,
+endpoint `https://openrouter.ai/api/alpha/decisions`, model `typesafe/jev-1.13`.
+It is not migrated to either provider's official endpoint. Non-secret configuration
+is stored in config.json; dedicated keys stay in auth.json with mode 0600.
+Credentials are immutable revisions bound to protocol and endpoint; config.json
+activates a revision only after its successful atomic write. A failed settings
+write may leave an unreferenced credential revision but never replaces the active
+key. An omitted/empty key can reuse the active credential only for the same
+protocol and endpoint. Changing just the model can retain that key. Changing the
+protocol or endpoint requires a key when the threshold is nonzero.
+
+In Textual, highlighting AI Check shows the model and probability threshold.
+`Save` applies the complete draft and closes only on successful acknowledgement.
+`Change model` opens an API picker, then URL/model/masked-key fields. `Use model`
+returns a draft to the parent without a daemon request. Escape in the fields
+returns to the API picker and clears the key; Escape there cancels the child.
+Closing the parent discards its unsaved model, key and threshold. Save errors keep
+the draft editable. Ask before and Danger keep their direct selection behavior.
+
+`confidence` is retained as a compatibility field name for the integer threshold
+from 0 through 100, persisted as `permission_confidence` (default 80). Its meaning
+is now **minimum estimated probability of allow**, not the API's `confidence`.
+Existing saved numeric values are preserved, but their meaning changes; they are
+not calibrated equivalences between models. For thresholds 1–100, an action passes
+when `probabilities.allow >= threshold / 100`. No complement of `deny` confidence
+or rounding is used. At 0, the verifier is not called, as in Danger, subject to
+Sane/OS restrictions. At 100 the supplied allow probability must be exactly 1.
+These are model estimates, not safety guarantees.
+
+OpenAI requests use named `choice` questions in an array and structured `input`;
+TypeSafe uses `state` and named questions with `criteria`. Both ask the same
+allow/deny risk question using the same filtered context. Answers must contain
+exactly the expected question, coherent choices and finite allow/deny probabilities
+in [0,1] whose sum is within 1e-6 of 1. Invalid, refused or missing answers and
+transport failures cannot authorize an action. Transport retains TLS verification,
+no redirects, bounded responses, timeouts and cancellation.
 
 The global selection is persisted outside sessions and read at each user turn;
 other already-running integrations finish with their current policy. Changing
 policy clears the connection's remembered grants. `ask` retains the existing
 permission protocol below. `auto` evaluates actions that would prompt using
-Jev through OpenRouter, with instructions to allow routine repository work and
-refuse concrete harmful risks. Its confidence to run is compared with the selected
+a configured decision API, with instructions to allow routine repository work and
+refuse concrete harmful risks. Its allow probability is compared with the selected
 threshold. A score below threshold, oversized input and service errors produce a
 tool error, never `permission.requested` or a human `no` decision. The action is
 not executed, but the turn is not cancelled: the model receives guidance to
@@ -950,9 +976,11 @@ but both policies still enforce Sane prohibitions before any approval.
 
 Automatic decisions emit `permission.resolved` directly, without a preceding
 human prompt, with `decision: "ai_accepted"` or `"ai_refused"`. These decisions
-include `confidence` when available, a number in [0,1] that always means confidence
-to run (not confidence in Jev's original choice). It is absent on unavailability,
-never replaced with a fabricated zero. The same value is persisted and displayed.
+include `confidence` when available. For newly evaluated actions this compatibility
+field contains the estimated probability of allow in [0,1], not the API confidence.
+Historical snapshots retain their original recorded scores without reinterpretation.
+It is absent on unavailability, never replaced with a fabricated zero. The same
+recorded value is persisted and displayed.
 These decisions
 are persisted in tool-result `metadata.permissions` and retained in lightweight
 history summaries. They are not valid client `permission.reply` values.

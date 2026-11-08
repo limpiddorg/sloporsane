@@ -55,6 +55,7 @@ from .recap_idle import RecapIdle
 from .model_screen import ModelScreen
 from .mcps_screen import McpsScreen
 from .permissions_screen import PermissionsScreen
+from .decision_model_screen import DecisionModelScreen
 from .manual_approval import ManualApprovalView, was_ai_refused
 from .tool_view import ReadView, ToolView
 from .turn_activity import ActivityToggle, TurnActivity
@@ -496,7 +497,7 @@ class SosApp(App[None]):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         workspace = self.query_one(ImplementationWorkspace) if self.is_mounted else None
         inspecting = workspace is not None and workspace.display and not workspace.revision_page_visible and not isinstance(self.screen, ModalScreen)
-        if action == "request_cancel" and isinstance(self.screen, UpdateScreen):
+        if action == "request_cancel" and isinstance(self.screen, (UpdateScreen, DecisionModelScreen)):
             return False
         if action == "implementation_slash":
             return inspecting and not isinstance(self.focused, MessageInput)
@@ -608,6 +609,9 @@ class SosApp(App[None]):
         self.action_toggle_mode()
 
     def action_toggle_mode(self) -> None:
+        if isinstance(self.screen, DecisionModelScreen):
+            self.screen.focus_next()
+            return
         if self.runtime_info.get("implementation_view"):
             return
         if self.question_screen is not None:
@@ -1936,6 +1940,7 @@ class SosApp(App[None]):
             self.close_permissions_screen(event.screen)
 
     def close_permissions_screen(self, screen: PermissionsScreen) -> None:
+        screen.discard_secrets()
         screen.finished = True
         screen.dismiss()
         self.permissions_screen = None

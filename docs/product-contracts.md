@@ -43,6 +43,34 @@ Les interactions TUI décrites ici visent Python/Textual, pas une obligation de 
   indicateur de génération ; son composer demande de terminer l'implémentation.
   Conserver la page et la position lors des retours.
 
+## AI Check
+
+- `/permissions` propose Ask before, AI Check et Danger, indépendamment de Sane/Slop.
+  AI Check affiche `API: …` puis `Model: …` sur deux lignes et le seuil dès sa sélection,
+  sans activation avant Save. Ne pas afficher de paragraphe de migration des seuils.
+  Sans clé configurée ni modèle en brouillon utilisable, masquer les lignes API et Model
+  plutôt que montrer les valeurs par défaut comme une configuration active.
+  Ask before et Danger conservent leur sélection directe.
+- Les pourcentages sont la probabilité estimée de `allow`, pas le champ `confidence`
+  du fournisseur : autoriser à partir du seuil inclus. Conserver les valeurs enregistrées,
+  documenter leur signification et l’absence de garantie de sécurité ou
+  d’équivalence de calibration entre modèles. À 0, aucun appel au vérificateur ; les
+  restrictions Sane/review restent prioritaires.
+- Save applique ensemble le modèle, le seuil et la clé en brouillon, puis ferme après
+  acknowledgement. Une erreur laisse les réglages corrigeables. Fermer sans Save
+  abandonne le brouillon et efface sa clé temporaire.
+- Change model ouvre une popup : choisir OpenAI Decisions ou TypeSafe, puis renseigner
+  endpoint complet, modèle libre et clé masquée. Proposer les endpoints officiels,
+  préserver les paramètres historiques OpenRouter ; aucun appel daemon avant Save
+  dans le parent. Use model ne fait que revenir au parent avec le brouillon.
+- Échap dans les champs revient au choix d’API et efface la clé saisie ; Échap dans
+  ce choix annule la popup. Une clé sauvegardée n’est jamais relue dans le formulaire.
+  Sa réutilisation exige le même protocole et endpoint ; changer seulement le modèle
+  peut la conserver. Les secrets restent dans auth.json protégé, jamais dans le chat.
+- Exiger la capacité `permission_check_version: 1` pour configurer AI Check. Un ancien
+  daemon ne doit pas ignorer silencieusement modèle ou nouvelle sémantique des seuils.
+  Les historiques restent immuables, avec leurs scores enregistrés d’origine.
+
 ## Interactions Textual
 
 - L'outil `wait` attend la fin d'une opération extérieure via une commande de surveillance,

@@ -61,21 +61,67 @@ int ProviderConnections::permissionConfidence() const {
 }
 
 void ProviderConnections::setPermissionMode(PermissionMode mode, std::optional<int> confidence) {
-    const auto threshold = confidence.value_or(permissionConfidence());
-    if (threshold < 0 || threshold > 100) throw std::invalid_argument("Confidence must be between 0 and 100");
-    if (mode == PermissionMode::AUTO && threshold != 0 && !hasPermissionKey())
-        throw std::invalid_argument("Enter an OpenRouter API key for AI verification first");
+    savePermissionSettings(mode, confidence);
+}
+
+PermissionVerifierConfig ProviderConnections::permissionModel() const {
+    std::lock_guard lock(permissionMutex);
+    const auto data = readPrivateJson(config);
+    return data.contains("permission_model") ? data.at("permission_model").get<PermissionVerifierConfig>()
+                                             : PermissionVerifierConfig{};
+}
+
+nlohmann::json ProviderConnections::permissionModelInfo() const {
+    std::lock_guard lock(permissionMutex);
+    nlohmann::json result = permissionModel();
+    result["has_key"] = hasPermissionKey();
+    return result;
+}
+
+bool ProviderConnections::hasPermissionKey() const {
+    std::lock_guard lock(permissionMutex);
+    const auto data = readPrivateJson(config);
+    const auto model = permissionModel();
+    return !auth->permissionKey(decisionProtocolName(model.protocol), model.endpoint,
+        data.value("permission_credential", "")).empty();
+}
+
+void ProviderConnections::savePermissionKey(const std::string& key) {
+    savePermissionSettings(permissionMode(), {}, {}, key);
+}
+
+void ProviderConnections::savePermissionSettings(PermissionMode mode, std::optional<int> threshold,
+    std::optional<PermissionVerifierConfig> model, const std::string& key) {
+    std::lock_guard lock(permissionMutex);
     auto data = readPrivateJson(config);
-    data["permission_mode"] = permissionModeName(mode);
-    data["permission_confidence"] = threshold;
+    const auto selected = model.value_or(permissionModel());
+    selected.validate();
+    const int percentage = threshold.value_or(permissionConfidence());
+    if (percentage < 0 || percentage > 100) throw std::invalid_argument("Probability must be between 0 and 100");
+    // Validate the mode before staging any credential.
+    const auto modeName = permissionModeName(mode);
+    const auto previous = permissionModel();
+    std::string revision = data.value("permission_credential", "");
+    if (selected.protocol != previous.protocol || selected.endpoint != previous.endpoint) revision.clear();
+    if (!key.empty()) validateApiKeyFormat(key);
+    const auto existing = auth->permissionKey(decisionProtocolName(selected.protocol), selected.endpoint, revision);
+    if (mode == PermissionMode::AUTO && percentage != 0 && key.empty() && existing.empty())
+        throw std::invalid_argument("Enter an API key for the selected AI Check endpoint first");
+    if (!key.empty()) revision = auth->stagePermissionKey(decisionProtocolName(selected.protocol), selected.endpoint, key);
+    // Staged revisions are immutable. A failed settings write leaves the old configuration and key active.
+    data["permission_mode"] = modeName;
+    data["permission_confidence"] = percentage;
+    data["permission_model"] = selected;
+    data["permission_credential"] = revision;
     writePrivateJson(config, data);
 }
 
-bool ProviderConnections::hasPermissionKey() const { return !auth->permissionKey().empty(); }
-void ProviderConnections::savePermissionKey(const std::string& key) { auth->setPermissionKey(key); }
-
 PermissionManager::Verifier ProviderConnections::permissionVerifier(const std::string& workspace,
     const std::string& context) const {
+    std::lock_guard lock(permissionMutex);
+    const auto model = permissionModel();
+    const auto key = auth->permissionKey(decisionProtocolName(model.protocol), model.endpoint,
+        readPrivateJson(config).value("permission_credential", ""));
     // Only the current user's request, not tool output, reasoning or stored credentials.
     std::string excerpt = context;
     if (excerpt.size() > 2000) {
@@ -84,8 +130,8 @@ PermissionManager::Verifier ProviderConnections::permissionVerifier(const std::s
         excerpt.resize(end);
         excerpt += " [truncated]";
     }
-    return [store = auth, workspace, excerpt](const ToolPermissionRequest& request, const std::function<void()>& check) {
-        return PermissionVerifier(store->permissionKey()).verify(request, workspace, excerpt, [check] {
+    return [model, key, workspace, excerpt](const ToolPermissionRequest& request, const std::function<void()>& check) {
+        return PermissionVerifier(key, model).verify(request, workspace, excerpt, [check] {
             try { check(); return false; }
             catch (...) { return true; }
         });

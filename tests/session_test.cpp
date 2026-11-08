@@ -5726,6 +5726,48 @@ TEST_F(SessionTest, ConfidenceSelectionAcknowledgesAndPersistsTheActualThreshold
     EXPECT_EQ(restored.permissionConfidence(), 95);
 }
 
+TEST_F(SessionTest, AICheckModelSelectionIsVersionedPersistentAndNeverReturnsTheKey) {
+    auto auth = std::make_shared<AuthStore>(directory / "auth.json");
+    auto preferences = std::make_shared<ProviderConnections>(auth, directory / "config.json");
+    const json model{{"protocol", "openai_decisions"}, {"endpoint", "https://api.openai.com/v1/decisions"},
+        {"model", "custom-decision-model"}};
+    healthExchange([&](ConnectionSocket& client) -> asio::awaitable<void> {
+        const auto ready = co_await receiveEvent(client);
+        EXPECT_EQ(ready.at("info").at("permission_check_version"), 1);
+        co_await client.send({{"type", "permissions.select"}, {"mode", "auto"}, {"confidence", 91},
+            {"check_version", 1}, {"model_config", model}, {"key", "test-decision-secret"}});
+        const auto selected = co_await receiveEvent(client);
+        EXPECT_EQ(selected.at("type"), "permissions.selected");
+        EXPECT_EQ(selected.at("model_config").at("model"), "custom-decision-model");
+        EXPECT_TRUE(selected.at("model_config").at("has_key"));
+        EXPECT_EQ(selected.at("info").at("permission_model").at("endpoint"), model.at("endpoint"));
+        EXPECT_EQ(selected.dump().find("test-decision-secret"), std::string::npos);
+        co_await client.send({{"type", "permissions.get"}});
+        const auto current = co_await receiveEvent(client);
+        EXPECT_EQ(current.at("confidence"), 91);
+        EXPECT_EQ(current.at("check_version"), 1);
+        EXPECT_EQ(current.dump().find("test-decision-secret"), std::string::npos);
+        // Omitting the version must not silently apply only the threshold.
+        co_await client.send({{"type", "permissions.select"}, {"mode", "auto"}, {"confidence", 20}, {"model_config", model}});
+        EXPECT_EQ((co_await receiveEvent(client)).at("type"), "request.failed");
+        auto changed = model;
+        changed["endpoint"] = "https://other.example/v1/decisions";
+        co_await client.send({{"type", "permissions.select"}, {"mode", "auto"}, {"confidence", 30},
+            {"check_version", 1}, {"model_config", changed}});
+        const auto rejected = co_await receiveEvent(client);
+        EXPECT_EQ(rejected.at("type"), "request.failed");
+        EXPECT_EQ(rejected.dump().find("test-decision-secret"), std::string::npos);
+        EXPECT_EQ(preferences->permissionConfidence(), 91);
+        EXPECT_EQ(preferences->permissionModel().endpoint, model.at("endpoint"));
+        co_await client.send({{"type", "integration.close"}});
+    }, {}, {}, std::chrono::seconds(5), std::chrono::milliseconds(500), preferences);
+    ProviderConnections restored(auth, directory / "config.json");
+    EXPECT_EQ(restored.permissionMode(), PermissionMode::AUTO);
+    EXPECT_EQ(restored.permissionConfidence(), 91);
+    EXPECT_EQ(restored.permissionModel().model, "custom-decision-model");
+    EXPECT_TRUE(restored.hasPermissionKey());
+}
+
 TEST_F(SessionTest, CancelRequestInterruptsProviderAndNextMessageResumesSameSession) {
     provider->waitForCancellation = true;
     auto entered = provider->entered.get_future();

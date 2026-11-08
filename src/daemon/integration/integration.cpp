@@ -70,6 +70,8 @@ nlohmann::json Integration::runtimeInfo() const {
     result["permission_mode"] = permissionModeName(providers ? providers->permissionMode() : PermissionMode::ASK);
     result["has_permission_key"] = providers && providers->hasPermissionKey();
     result["permission_confidence"] = providers ? providers->permissionConfidence() : 80;
+    result["permission_check_version"] = 1;
+    result["permission_model"] = providers ? providers->permissionModelInfo() : nlohmann::json(nullptr);
     result["reasoning"] = selected.reasoning;
     result["context_limit"] = selected.contextLimit ? nlohmann::json(*selected.contextLimit) : nlohmann::json(nullptr);
     if (selected.contextLimit) result["total_context"] = *selected.contextLimit;
@@ -206,12 +208,13 @@ asio::awaitable<void> Integration::readRequests() {
         IntegrationRequest request;
         try { request = json->get<IntegrationRequest>(); }
         catch (const std::exception&) {
-            if (!json->value("type", "").starts_with("mcp.")) throw;
+            const auto type = json->value("type", "");
+            if (!type.starts_with("mcp.") && type != "permissions.select") throw;
             // Never echo parse diagnostics that could contain a credential.
             request = IntegrationRequest{};
-            request.type = "mcp.invalid";
+            request.type = type == "permissions.select" ? "permissions.invalid" : "mcp.invalid";
             request.requestId = json->value("requestId", "");
-            request.invalidMcp = true;
+            request.invalidMcp = type.starts_with("mcp.");
         }
         if (request.type == "integration.close") { close(); co_return; }
         if (request.type == "integration.pong") { acknowledgePong(request.pingId); continue; }
@@ -253,6 +256,7 @@ void Integration::subscribe() {
 
 asio::awaitable<nlohmann::json> Integration::handle(const IntegrationRequest& request) {
     using nlohmann::json;
+    if (request.type == "permissions.invalid") throw std::invalid_argument("Invalid AI Check settings; check the configuration fields and version");
     if (request.invalidMcp) throw std::invalid_argument("Invalid MCP request; check the configuration fields");
     if (request.type == "mcp.cancel") co_return co_await handleMcp(request);
     if (request.mcpRequest) co_return co_await handleMcp(request);
@@ -288,6 +292,7 @@ asio::awaitable<nlohmann::json> Integration::handle(const IntegrationRequest& re
         co_return nlohmann::json{{"type", "permissions.current"}, {"requestId", request.requestId},
             {"mode", permissionModeName(providers ? providers->permissionMode() : PermissionMode::ASK)},
             {"has_key", providers && providers->hasPermissionKey()},
+            {"check_version", 1}, {"model_config", providers ? providers->permissionModelInfo() : nlohmann::json(nullptr)},
             {"confidence", providers ? providers->permissionConfidence() : 80}};
     }
     if (request.type == "integration.configure") {
@@ -373,7 +378,10 @@ asio::awaitable<nlohmann::json> Integration::handleProvider(const IntegrationReq
 
 asio::awaitable<nlohmann::json> Integration::selectPermissions(const IntegrationRequest& request) {
     if (!providers) throw std::runtime_error("Permission settings are unavailable");
-    if (request.permissionMode == PermissionMode::AUTO && !request.permissionKey.empty()) {
+    // Preserve the old client's OpenRouter key validation only for its original destination.
+    if (!request.permissionModel && request.permissionMode == PermissionMode::AUTO && !request.permissionKey.empty() &&
+        providers->permissionModel().endpoint == PermissionVerifierConfig{}.endpoint &&
+        providers->permissionModel().protocol == DecisionProtocol::TYPESAFE) {
         permissionCancellation = std::make_shared<std::atomic<bool>>(false);
         auto job = std::async(std::launch::async, [connections = providers, key = request.permissionKey,
             cancel = permissionCancellation] {
@@ -384,13 +392,14 @@ asio::awaitable<nlohmann::json> Integration::selectPermissions(const Integration
         permissionCancellation.reset();
         job.get();
         if (closing || cancelled) co_return nullptr;
-        providers->savePermissionKey(request.permissionKey);
     }
-    providers->setPermissionMode(request.permissionMode, request.permissionConfidence);
+    providers->savePermissionSettings(request.permissionMode, request.permissionConfidence,
+        request.permissionModel, request.permissionKey);
     permissions->setPermissionMode(request.permissionMode,
         providers->permissionVerifier(permissions->root().string(), session ? session->lastUserMessage() : ""),
         providers->permissionConfidence());
     co_return nlohmann::json{{"type", "permissions.selected"}, {"requestId", request.requestId},
+        {"check_version", 1}, {"model_config", providers->permissionModelInfo()},
         {"mode", permissionModeName(request.permissionMode)}, {"confidence", providers->permissionConfidence()}};
 }
 

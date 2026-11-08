@@ -12,6 +12,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <optional>
+#include <limits>
 
 namespace {
 using nlohmann::json;
@@ -359,7 +360,7 @@ TEST_F(PermissionModesTest, SettingsPersistWithoutReplacingProviderCredentials) 
     ProviderConnections connections(auth, directory / "config.json");
     EXPECT_EQ(connections.permissionMode(), PermissionMode::ASK);
     EXPECT_THROW(connections.setPermissionMode(PermissionMode::AUTO), std::invalid_argument);
-    connections.savePermissionKey("verifier-key");
+    auth->setPermissionKey("verifier-key");  // Historical OpenRouter credential.
     connections.setPermissionMode(PermissionMode::AUTO);
     EXPECT_EQ(auth->get("openrouter").key, "chat-key");
     EXPECT_EQ(auth->permissionKey(), "verifier-key");
@@ -372,6 +373,65 @@ TEST_F(PermissionModesTest, SettingsPersistWithoutReplacingProviderCredentials) 
     EXPECT_EQ(status.st_mode & 0777, 0600);
     connections.setPermissionMode(PermissionMode::DANGER);
     EXPECT_EQ(reopened.permissionMode(), PermissionMode::DANGER);
+}
+
+TEST_F(PermissionModesTest, DecisionModelRoundTripBindsKeysAndPreservesChatAndThreshold) {
+    const auto path = directory / "config.json";
+    auto auth = std::make_shared<AuthStore>(directory / "auth.json");
+    auth->setPermissionKey("legacy-key");
+    auth->set("openai", {.key = "chat-key"});
+    writePrivateJson(path, {{"permission_mode", "auto"}, {"permission_confidence", 93},
+        {"provider", "openai"}, {"model", "chat-model"}});
+    ProviderConnections connections(auth, path);
+    EXPECT_EQ(connections.permissionModel().endpoint, "https://openrouter.ai/api/alpha/decisions");
+    EXPECT_TRUE(connections.hasPermissionKey());
+    PermissionVerifierConfig selected{DecisionProtocol::OPENAI_DECISIONS, "https://api.openai.com/v1/decisions", "decision-model"};
+    const auto before = readPrivateJson(path);
+    EXPECT_THROW(connections.savePermissionSettings(PermissionMode::AUTO, {}, selected), std::invalid_argument);
+    EXPECT_EQ(readPrivateJson(path), before);
+    connections.savePermissionSettings(PermissionMode::AUTO, {}, selected, "new-key");
+    ProviderConnections reopened(auth, path);
+    EXPECT_EQ(reopened.permissionConfidence(), 93);
+    EXPECT_EQ(reopened.permissionModel().model, "decision-model");
+    EXPECT_TRUE(reopened.hasPermissionKey());
+    EXPECT_EQ(auth->get("openai").key, "chat-key");
+    EXPECT_EQ(reopened.selection().model, "chat-model");
+    const auto saved = readPrivateJson(path);
+    EXPECT_EQ(saved.dump().find("new-key"), std::string::npos);
+    const auto revision = saved.at("permission_credential").get<std::string>();
+    EXPECT_EQ(auth->permissionKey("openai_decisions", selected.endpoint, revision), "new-key");
+    EXPECT_TRUE(auth->permissionKey("typesafe", selected.endpoint, revision).empty());
+    EXPECT_TRUE(auth->permissionKey("openai_decisions", "https://other.example/decisions", revision).empty());
+    EXPECT_TRUE(auth->permissionKey("typesafe", "https://api.typesafe.ai/v1/systemone", "").empty());
+    EXPECT_EQ(reopened.permissionModelInfo().dump().find("new-key"), std::string::npos);
+    struct stat status{};
+    ASSERT_EQ(::stat((directory / "auth.json").c_str(), &status), 0);
+    EXPECT_EQ(status.st_mode & 0777, 0600);
+    selected.endpoint = "https://other.example/decisions";
+    EXPECT_THROW(reopened.savePermissionSettings(PermissionMode::AUTO, 90, selected), std::invalid_argument);
+    EXPECT_EQ(readPrivateJson(path), saved);
+    auto invalid = selected;
+    invalid.model = "";
+    EXPECT_THROW(reopened.savePermissionSettings(PermissionMode::AUTO, 90, invalid, "secret"), std::invalid_argument);
+    EXPECT_EQ(readPrivateJson(path), saved);
+    reopened.savePermissionSettings(PermissionMode::AUTO, 0, selected);
+    EXPECT_FALSE(reopened.hasPermissionKey());
+}
+
+TEST_F(PermissionModesTest, FailedSettingsWriteCannotActivateStagedCredential) {
+    auto auth = std::make_shared<AuthStore>(directory / "auth.json");
+    const auto path = directory / std::string(252, 'c');
+    // The valid filename fits NAME_MAX, but the atomic writer's temporary suffix does not.
+    const auto revision = auth->stagePermissionKey("typesafe", "https://api.typesafe.ai/v1/systemone", "old-key");
+    const json original{{"permission_mode", "auto"}, {"permission_confidence", 88},
+        {"permission_model", {{"protocol", "typesafe"}, {"endpoint", "https://api.typesafe.ai/v1/systemone"}, {"model", "jev-latest"}}},
+        {"permission_credential", revision}};
+    std::ofstream(path) << original;
+    ProviderConnections connections(auth, path);
+    EXPECT_THROW(connections.savePermissionSettings(PermissionMode::AUTO, 99, {}, "replacement-key"), std::runtime_error);
+    EXPECT_EQ(readPrivateJson(path), original);
+    EXPECT_EQ(auth->permissionKey("typesafe", "https://api.typesafe.ai/v1/systemone", revision), "old-key");
+    EXPECT_TRUE(connections.hasPermissionKey());
 }
 
 TEST_F(PermissionModesTest, ManualApprovalIsExactRepeatableRevocableAndNeverOverridesSane) {
@@ -421,46 +481,69 @@ TEST(PermissionModesProtocolTest, ManualApprovalRequiresSessionTargetAndBoolean)
     EXPECT_THROW(parsePermissionDecision("manually_approved"), std::invalid_argument);
 }
 
-TEST(PermissionVerifierTest, DefaultThresholdRequiresEightyPercentRunConfidence) {
-    auto response = json{{"answers", {{"permission", {{"type", "choice"}, {"choice", "allow"}, {"confidence", 0.99}}}}}};
-    for (const double value : {0.80, 0.94, 0.99, 1.0}) {
-        response["answers"]["permission"]["confidence"] = value;
-        EXPECT_TRUE(PermissionVerifier::allows(response)) << value;
+TEST(PermissionVerifierTest, DefaultThresholdRequiresEightyPercentAllowProbability) {
+    for (const auto protocol : {DecisionProtocol::TYPESAFE, DecisionProtocol::OPENAI_DECISIONS}) {
+        const auto responseFor = [protocol](double allow) {
+            json answer{{"type", "choice"}, {"choice", allow >= 0.5 ? "allow" : "deny"},
+                {"confidence", 0.01}};
+            if (protocol == DecisionProtocol::TYPESAFE) {
+                answer["probabilities"] = {{"allow", allow}, {"deny", 1 - allow}};
+                return json{{"answers", {{"permission", answer}}}};
+            }
+            answer["name"] = "permission";
+            answer["probabilities"] = json::array({{{"value", "deny"}, {"probability", 1 - allow}},
+                {{"value", "allow"}, {"probability", allow}}});
+            return json{{"answers", json::array({answer})}};
+        };
+        for (const double value : {0.8, 0.94, 0.99, 1.0})
+            EXPECT_TRUE(PermissionVerifier::allows(responseFor(value), 80, protocol));
+        for (const double value : {0.7999999999999, 0.0, 0.5})
+            EXPECT_FALSE(PermissionVerifier::allows(responseFor(value), 80, protocol));
+        EXPECT_DOUBLE_EQ(*PermissionVerifier::allowProbability(responseFor(0.02), protocol), 0.02);
+        EXPECT_TRUE(PermissionVerifier::allows(responseFor(0.02), 2, protocol));
+        EXPECT_FALSE(PermissionVerifier::allows(responseFor(0.02), 3, protocol));
+        EXPECT_TRUE(PermissionVerifier::allows(responseFor(1), 100, protocol));
+        EXPECT_TRUE(PermissionVerifier::allows(json::object(), 0, protocol));
+        EXPECT_THROW(PermissionVerifier::allows(responseFor(1), 101, protocol), std::invalid_argument);
     }
-    for (const auto value : {json(0.799999), json(0.0), json(1.01), json(-1), json("0.99"), json(nullptr)}) {
-        response["answers"]["permission"]["confidence"] = value;
-        EXPECT_FALSE(PermissionVerifier::allows(response));
-    }
-    response["answers"]["permission"]["confidence"] = 1.0;
-    response["answers"]["permission"]["choice"] = "deny";
-    EXPECT_FALSE(PermissionVerifier::allows(response));
-    EXPECT_FALSE(PermissionVerifier::allows(json::object()));
-    EXPECT_FALSE(PermissionVerifier::allows({{"answers", json::array()}}));
 }
 
-TEST(PermissionVerifierTest, DenyConfidenceIsAlwaysInvertedBeforeThresholding) {
-    auto response = json{{"answers", {{"permission", {{"type", "choice"}, {"choice", "deny"}, {"confidence", 0.98}}}}}};
-    EXPECT_DOUBLE_EQ(*PermissionVerifier::runConfidence(response), 0.02);
-    EXPECT_TRUE(PermissionVerifier::allows(response, 2));
-    EXPECT_FALSE(PermissionVerifier::allows(response, 3));
-    response["answers"]["permission"]["confidence"] = 0.80;
-    EXPECT_DOUBLE_EQ(*PermissionVerifier::runConfidence(response), 0.20);
-    EXPECT_TRUE(PermissionVerifier::allows(response, 20));
-    response["answers"]["permission"]["confidence"] = 0.0;
-    EXPECT_TRUE(PermissionVerifier::allows(response, 100));
-    response["answers"]["permission"]["choice"] = "allow";
-    EXPECT_EQ(PermissionVerifier::runConfidence(response), 0.0);
-    EXPECT_FALSE(PermissionVerifier::allows(response, 1));
-    response["answers"]["permission"]["confidence"] = 1.0;
-    EXPECT_TRUE(PermissionVerifier::allows(response, 100));
-    EXPECT_TRUE(PermissionVerifier::allows(json::object(), 0));
-    for (const auto invalid : {json(-1), json(1.01), json("0.98"), json(nullptr)}) {
-        response["answers"]["permission"]["confidence"] = invalid;
-        EXPECT_FALSE(PermissionVerifier::runConfidence(response));
+TEST(PermissionVerifierTest, InvalidDistributionsAndRefusalsNeverAuthorize) {
+    const json valid{{"type", "choice"}, {"choice", "allow"},
+        {"probabilities", {{"allow", 0.95}, {"deny", 0.05}}}};
+    std::vector<json> invalid;
+    for (const auto& value : {json(-1), json(1.01), json("0.95"), json(nullptr),
+         json(std::numeric_limits<double>::infinity()), json(std::numeric_limits<double>::quiet_NaN())}) {
+        auto answer = valid;
+        answer["probabilities"]["allow"] = value;
+        invalid.push_back(answer);
     }
-    response["answers"]["permission"]["confidence"] = 1.0;
-    response["answers"]["permission"]["choice"] = "unknown";
-    EXPECT_FALSE(PermissionVerifier::runConfidence(response));
+    for (const auto& patch : std::vector<json>{
+        {{"choice", "deny"}}, {{"choice", 42}}, {{"type", "refusal"}}, {{"type", nullptr}},
+        {{"probabilities", {{"allow", 0.9}, {"deny", 0.5}}}},
+        {{"probabilities", {{"allow", 0.95}}}},
+        {{"probabilities", {{"allow", 0.95}, {"other", 0.05}}}},
+        {{"probabilities", json::array()}}, {{"probabilities", nullptr}}}) {
+        auto answer = valid;
+        answer.update(patch);
+        invalid.push_back(answer);
+    }
+    invalid.push_back(json{{"type", "choice"}, {"choice", "allow"}, {"confidence", 1.0}});
+    invalid.push_back(nullptr);
+    for (const auto& answer : invalid) {
+        const json response{{"answers", {{"permission", answer}}}};
+        EXPECT_FALSE(PermissionVerifier::allowProbability(response)) << response;
+    }
+    EXPECT_FALSE(PermissionVerifier::allowProbability({{"answers", {{"permission", valid}, {"extra", valid}}}}));
+    EXPECT_FALSE(PermissionVerifier::allowProbability({{"error", "refused"}, {"answers", {{"permission", valid}}}}));
+    EXPECT_FALSE(PermissionVerifier::allowProbability(json::array()));
+    for (const auto& answers : std::vector<json>{json::array(),
+        json::array({valid, valid}), json::array({{{"type", "refusal"}, {"name", "permission"}}}),
+        json::array({{{"type", "choice"}, {"name", "wrong"}}}),
+        json::array({{{"type", "choice"}, {"name", "permission"}, {"choice", "allow"},
+            {"probabilities", json::array({{{"value", "allow"}, {"probability", 0.5}},
+                {{"value", "allow"}, {"probability", 0.5}}})}}})})
+        EXPECT_FALSE(PermissionVerifier::allowProbability({{"answers", answers}}, DecisionProtocol::OPENAI_DECISIONS));
 }
 
 TEST_F(PermissionModesTest, ThresholdUsesRunConfidenceAndZeroDisablesVerifierWithoutOverridingSane) {

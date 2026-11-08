@@ -443,24 +443,21 @@ partagées `dialog_row` affichent `Current` (permissions et modèles) et `Connec
 (providers et méthodes d'authentification) à droite, en corail (`BOLD_MD`).
 Danger supprime les confirmations, jamais les interdictions Sane ni les limites
 du système d'exploitation. Son avertissement mentionne explicitement les pertes
-de fichiers, et recommande AI Verified en cas de doute.
+de fichiers, et recommande AI Check en cas de doute.
 
-Auto intervient aux endroits qui demanderaient une permission humaine. Le composant
-`PermissionVerifier` appelle `https://openrouter.ai/api/alpha/decisions` avec
-`typesafe/jev-1.13`, une question `choice` et les réponses `allow` / `deny`. Le prompt
-autorise le développement courant dans le repo (sources, builds, tests, dépendances,
-scripts locaux et nettoyage des artefacts) sans zèle sur le
-contenu des sources, et cible les risques concrets : DB de
-production, suppression de fichiers personnels, dommages système, exfiltration.
-Le seul fait de lancer une commande depuis le repo ne rend pas ses effets externes sûrs.
-La confiance est toujours celle d'exécuter : `allow` conserve son score,
-`deny` à 98 % devient 2 %. Ce score normalisé est comparé au seuil entier global
-`permission_confidence` (0–100, défaut 80) dans `config.json`. Une confiance de
-refus faible peut donc passer un seuil bas. À 0, aucun appel Jev : même politique
-que Danger, sans contourner Sane. À 100, il faut un score de 100 %, sans garantie
-de sûreté calibrée. Les erreurs et scores invalides bloquent l'action lorsque les
-contrôles sont activés. Les scores sont normalisés à douze décimales pour éviter
-les erreurs de soustraction aux bornes des seuils entiers.
+AI Check intervient aux endroits qui demanderaient une permission humaine.
+`PermissionVerifier` utilise TypeSafe System One ou OpenAI Decisions, avec endpoint
+et modèle configurables et une question `choice` allow/deny. Le prompt autorise le
+développement courant dans le repo, sans zèle sur le contenu des sources, et cible
+les risques concrets : production, fichiers personnels, dommages système et exfiltration.
+Lancer une commande depuis le repo ne rend pas ses effets externes sûrs.
+Le seuil entier global `permission_confidence` (0–100, défaut 80) conserve son nom
+pour compatibilité mais signifie probabilité minimale de `allow`, sans lire ni
+inverser le champ API `confidence`. Les valeurs enregistrées restent inchangées,
+avec une nouvelle sémantique explicitée dans la TUI. À 0 aucun appel au vérificateur,
+comme Danger sans contourner Sane ; à 100 la probabilité doit valoir 1. Ces
+estimations ne sont pas des garanties de sécurité ni une calibration commune aux modèles.
+Les distributions invalides et les erreurs ne peuvent jamais autoriser une action.
 Une erreur d'outil explique au modèle que l'action n'a pas été exécutée, qu'il
 ne doit pas réessayer ou contourner le refus sans validation manuelle. Il peut
 proposer d'ouvrir Activity, de déplier l'action sous `Refused tools`, de cliquer sur `Approve`, puis d'envoyer un
@@ -468,10 +465,11 @@ nouveau message ; sinon il continue sans cette action. Cette consigne est transm
 arrêt de la boucle agent. Contrairement au `no` humain, ce refus n'annule pas le tour.
 Les décisions Auto émettent directement `permission.resolved` avec `ai_accepted`
 ou `ai_refused`, puis sont conservées dans `metadata.permissions` du résultat.
-Le champ optionnel `confidence` (0–1) contient toujours la confiance d'exécuter,
-y compris dans les résumés légers SQLite. Un score manquant n'est pas un zéro.
-La TUI affiche `-> Accepted by AI (Jev)` ou `-> Refused by AI (Jev)`, en direct et
-après reprise. Ces valeurs ne sont jamais acceptées comme réponses humaines.
+Le champ optionnel `confidence` (0–1) conserve son nom pour compatibilité et porte
+la probabilité d'autorisation pour les nouvelles décisions. Les historiques gardent
+leurs scores enregistrés d'origine. Un score manquant n'est pas un zéro.
+Les décisions sont affichées en direct et après reprise ; elles ne sont jamais
+acceptées comme réponses humaines.
 La requête est annulable et limitée à 30 secondes ; le verrou des permissions
 n'est pas tenu pendant le réseau. Sane est revérifié après l'appel.
 
@@ -484,35 +482,27 @@ pas le comportement du code écrit. Les diffs locaux restent inchangés.
 Le contexte inclut le workspace et au plus 2 000 octets UTF-8 du dernier message utilisateur. Aucun
 historique complet ni sortie d'outil n'est ajouté. Un état dépassant 48 000 octets
 est refusé sans requête distante, plutôt que tronquer l'action.
-Les commandes, chemins et extraits utilisateur peuvent contenir des données privées ; cet envoi
-est documenté dans le README. La clé dédiée est saisie masquée,
-validée via `ApiKeyValidator`, puis stockée sous `permission_verifier` dans
-`auth.json` par `AuthStore`, sans remplacer les connexions de conversation.
-La disponibilité de la clé est transmise via `info.has_permission_key`, jamais
-la clé elle-même. Entrée sur Auto utilise directement la clé enregistrée ; sans
-clé, un champ masqué est proposé avec Échap pour revenir sans rien changer.
-`Change API key` ouvre ce même formulaire pour remplacer la clé ; le bouton
-`Use saved key` a été retiré. Un échec de sélection avec la clé enregistrée affiche
-le formulaire et l'erreur sans changer le mode courant.
-Quand les réglages Jev sont visibles à l'ouverture, `Save` reçoit le focus :
-Entrée sauvegarde, gauche/droite choisit entre `Save` et `Change API key`, Tab
-permet d'éditer le seuil. Les flèches dans le champ numérique ajustent sa valeur.
-En revenant sur la ligne Jev, la liste garde le focus et `Save` redevient
-l'action sélectionnée, visible en fond bleu et texte clair ; Entrée sur la
-ligne permet de rejoindre les actions sans sauvegarder immédiatement.
-Le seuil et ses boutons apparaissent directement sous les trois modes uniquement
-quand Jev est `Current` et que sa ligne est surlignée. Sur Ask ou Danger, ils sont masqués, sans
-écran de réglage séparé : sous « How confident… », un champ numérique court sur
-une ligne, sans bordure, ajustable par les flèches. Seules les explications 0/100 %
-figurent à droite ; pas de presets ni de paragraphe supplémentaire.
-La validation d'une nouvelle clé ou l'utilisation automatique de la clé enregistrée
-active Jev puis revient à cette liste,
-sans fermer la popup. `Save` (ou Entrée dans le champ) ferme la popup après confirmation
-de l'enregistrement du seuil ; un échec la garde ouverte avec le brouillon et l'erreur.
-`Change API key` permet de remplacer la clé ; il n'y a plus de bouton `Skip Jev`.
-Le seuil 0 reste disponible ; son explication à droite prend la couleur d'alerte à 0.
-La présence d'`info.permission_confidence` est requise par
-ce parcours pour qu'un ancien daemon ne puisse pas ignorer silencieusement le seuil.
+Les commandes, chemins et extraits utilisateur peuvent contenir des données privées.
+La configuration du modèle et les seuils sont dans config.json ; les clés dédiées,
+masquées dans la TUI, restent dans auth.json protégé en 0600. Elles sont liées au
+protocole et à l'endpoint, sans remplacement des credentials de conversation. La
+configuration historique Jev/OpenRouter conserve sa destination et son modèle.
+
+AI Check affiche le modèle, les pourcentages, `Save` et `Change model`. Entrée sur
+la ligne rejoint les réglages sans activer la politique ; seul Save applique le
+brouillon complet. Gauche/droite choisit les actions ; dans le champ numérique ces
+flèches ajustent la valeur. Sur Ask ou Danger, masquer ces réglages. Le seuil 0
+reste disponible avec un avertissement. Save ferme après acknowledgement ; une
+erreur garde les réglages corrigeables. Échap ferme sans sauvegarder et efface la clé.
+
+Change model ouvre le choix d'API (OpenAI Decisions / TypeSafe), puis les champs
+endpoint complet, modèle libre et clé masquée. Use model revient au parent avec un
+brouillon sans écriture ni appel réseau. Une clé sauvegardée peut rester vide
+uniquement pour le même protocole et endpoint. Les champs ne reçoivent jamais la
+clé du daemon. Exiger `info.permission_check_version: 1` pour empêcher un ancien
+daemon d'ignorer silencieusement modèle ou nouvelle sémantique des pourcentages.
+Voir les [contrats produit](docs/product-contracts.md#ai-check) et le
+[protocole](docs/daemon-protocol.md) pour le contrat détaillé.
 
 Les refus IA sont aussi affichés sous `Refused tools` dans une section séparée d'Activity,
 au-dessus d'un séparateur Muted aligné sur les flèches. Un carré Slop supplémentaire

@@ -4,6 +4,7 @@
 #include "../config.hpp"
 #include "provider_selection.hpp"
 #include "../permissions/permission_manager.hpp"
+#include "../permissions/permission_verifier.hpp"
 #include <agent-runtime/providers/provider.hpp>
 #include <agent-runtime/providers/provider_auth.hpp>
 #include <agent-runtime/providers/model_catalog.hpp>
@@ -62,6 +63,10 @@ public:
     void setPermissionMode(PermissionMode mode, std::optional<int> confidence = {});
     bool hasPermissionKey() const;
     void savePermissionKey(const std::string& key);
+    PermissionVerifierConfig permissionModel() const;
+    nlohmann::json permissionModelInfo() const;
+    void savePermissionSettings(PermissionMode mode, std::optional<int> threshold,
+        std::optional<PermissionVerifierConfig> model = {}, const std::string& key = "");
     PermissionManager::Verifier permissionVerifier(const std::string& workspace, const std::string& context) const;
     std::unique_ptr<Provider> create(const std::string& provider) const;
     bool hasAuth(const std::string& provider) const;
@@ -89,6 +94,7 @@ private:
     OAuthStarter oauthStarter;
     ModelCatalog catalog;
     ApiKeyValidator keyValidator;
+    mutable std::recursive_mutex permissionMutex;
 };
 
 #endif // SOS_PROVIDER_CONNECTIONS_HPP

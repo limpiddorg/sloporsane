@@ -147,6 +147,13 @@ void from_json(const nlohmann::json& json, IntegrationRequest& request) {
     } else if (request.type == "permissions.select") {
         request.permissionMode = parsePermissionMode(json.at("mode").get<std::string>());
         request.permissionKey = json.value("key", "");
+        if (json.contains("model_config")) {
+            if (json.value("check_version", nlohmann::json{}) != 1)
+                throw std::invalid_argument("AI Check configuration requires check_version 1");
+            request.permissionModel = json.at("model_config").get<PermissionVerifierConfig>();
+        } else if (json.contains("check_version") && json.at("check_version") != 1) {
+            throw std::invalid_argument("Unsupported AI Check configuration version");
+        }
         if (json.contains("confidence")) {
             const auto& value = json.at("confidence");
             if (!value.is_number_integer() || value < 0 || value > 100)

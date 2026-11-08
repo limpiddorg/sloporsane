@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <thread>
+#include <openssl/rand.h>
 
 const char* authMethodName(AuthMethod method) {
     switch (method) {
@@ -99,6 +100,38 @@ void AuthStore::setPermissionKey(const std::string& key) {
     auto data = readPrivateJson(path);
     data["permission_verifier"] = {{"provider", "openrouter"}, {"type", "api"}, {"key", key}};
     writePrivateJson(path, data);
+}
+
+std::string AuthStore::stagePermissionKey(const std::string& protocol, const std::string& endpoint,
+                                         const std::string& key) {
+    validateApiKeyFormat(key);
+    unsigned char bytes[16];
+    if (RAND_bytes(bytes, sizeof(bytes)) != 1) throw std::runtime_error("Cannot create credential revision");
+    constexpr char HEX[] = "0123456789abcdef";
+    std::string revision;
+    for (const auto byte : bytes) { revision += HEX[byte >> 4]; revision += HEX[byte & 15]; }
+    std::lock_guard lock(mutex);
+    auto data = readPrivateJson(path);
+    data["permission_credentials"][revision] = {{"protocol", protocol}, {"endpoint", endpoint}, {"key", key}};
+    writePrivateJson(path, data);
+    return revision;
+}
+
+std::string AuthStore::permissionKey(const std::string& protocol, const std::string& endpoint,
+                                     const std::string& revision) const {
+    // An unbound historical key is valid only at its original destination.
+    if (revision.empty()) {
+        if (protocol == "typesafe" && endpoint == "https://openrouter.ai/api/alpha/decisions") return permissionKey();
+        return {};
+    }
+    std::lock_guard lock(mutex);
+    const auto data = readPrivateJson(path);
+    if (!data.contains("permission_credentials") || !data.at("permission_credentials").contains(revision)) return {};
+    const auto& entry = data.at("permission_credentials").at(revision);
+    if (entry.value("protocol", "") != protocol || entry.value("endpoint", "") != endpoint) return {};
+    const auto key = entry.at("key").get<std::string>();
+    validateApiKeyFormat(key);
+    return key;
 }
 
 bool AuthStore::contains(const std::string& provider) const {

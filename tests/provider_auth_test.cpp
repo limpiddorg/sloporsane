@@ -51,7 +51,7 @@ class AuthHttpServer {
 public:
     using Chunk = std::pair<std::chrono::milliseconds, std::string>;
     explicit AuthHttpServer(std::vector<std::string> replies, std::vector<int> statuses = {}, bool stall = false,
-        std::vector<Chunk> chunks = {}) {
+        std::vector<Chunk> chunks = {}, std::string extraHeaders = "") {
         listener = ::socket(AF_INET, SOCK_STREAM, 0);
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -61,7 +61,7 @@ public:
             ::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &size)) throw std::runtime_error("Test HTTP bind failed");
         port = ntohs(address.sin_port);
         url = "http://127.0.0.1:" + std::to_string(port);
-        worker = std::async(std::launch::async, [this, replies, statuses, stall, chunks] {
+        worker = std::async(std::launch::async, [this, replies, statuses, stall, chunks, extraHeaders] {
             std::vector<std::string> requests;
             for (const auto& body : replies) {
                 pollfd ready{listener, POLLIN, 0};
@@ -100,7 +100,7 @@ public:
                     for (const auto& chunk : chunks) length += chunk.second.size();
                 }
                 const std::string response = "HTTP/1.1 " + std::to_string(status) + " Test\r\nConnection: close\r\nContent-Length: " +
-                    std::to_string(length) + "\r\n\r\n" + (chunks.empty() ? body : "");
+                    std::to_string(length) + "\r\n" + extraHeaders + "\r\n" + (chunks.empty() ? body : "");
                 if (!sendAll(client, response)) return requests;
                 for (const auto& [delay, bytes] : chunks) {
                     // Stop promptly when the provider closes the connection after cancellation/timeout.
@@ -112,6 +112,10 @@ public:
         });
     }
     ~AuthHttpServer() { ::shutdown(listener, SHUT_RDWR); ::close(listener); if (worker.valid()) worker.wait(); }
+    bool hasPendingRequest() const {
+        pollfd ready{listener, POLLIN, 0};
+        return ::poll(&ready, 1, 0) > 0;
+    }
     unsigned short port;
     std::string url;
     std::future<std::vector<std::string>> worker;
@@ -133,15 +137,15 @@ private:
 };
 
 TEST(PermissionVerifierHttpTest, SendsDecisionsContractAndFailsClosedOnInvalidResponses) {
-    AuthHttpServer server({R"({"answers":{"permission":{"type":"choice","choice":"allow","confidence":0.99}}})",
-        R"({"answers":{"permission":{"type":"choice","choice":"deny","confidence":1}}})",
+    AuthHttpServer server({R"({"answers":{"permission":{"type":"choice","choice":"allow","confidence":0.01,"probabilities":{"allow":0.99,"deny":0.01}}}})",
+        R"({"answers":{"permission":{"type":"choice","choice":"deny","confidence":0.01,"probabilities":{"allow":0,"deny":1}}}})",
         "not-json", "private-error-body"}, {200, 200, 200, 503});
     PermissionVerifier verifier("verification-key", server.url + "/api/alpha/decisions");
     ToolPermissionRequest request{"bash", {"cmake --build build-ai"}, {},
         {{"arguments", {{"command", "cmake --build build-ai"}, {"workdir", "/workspace"}}}}, "c", "bash"};
     EXPECT_EQ(verifier.verify(request, "/workspace", "Build the project", {}), 0.99);
     EXPECT_EQ(verifier.verify(request, "/workspace", "Build the project", {}), 0.0);
-    EXPECT_THROW(verifier.verify(request, "/workspace", "Build the project", {}), Json::parse_error);
+    EXPECT_FALSE(verifier.verify(request, "/workspace", "Build the project", {}));
     try { verifier.verify(request, "/workspace", "Build the project", {}); FAIL(); }
     catch (const std::runtime_error& error) {
         EXPECT_EQ(std::string(error.what()).find("private-error-body"), std::string::npos);
@@ -164,6 +168,93 @@ TEST(PermissionVerifierHttpTest, SendsDecisionsContractAndFailsClosedOnInvalidRe
     EXPECT_EQ(body["state"]["details"]["arguments"]["command"], "cmake --build build-ai");
     EXPECT_EQ(body["state"]["recent_user_request"], "Build the project");
     EXPECT_EQ(body.dump().find("verification-key"), std::string::npos);
+}
+
+TEST(PermissionVerifierHttpTest, ConfigValidatesEndpointsWithoutExposingTheirContents) {
+    for (const auto& endpoint : {"https://api.typesafe.ai/v1/systemone", "https://api.openai.com/v1/decisions",
+         "http://localhost:8080/decision", "http://127.0.0.1:8080/decision", "http://[::1]:8080/decision"}) {
+        PermissionVerifierConfig config{.endpoint = endpoint};
+        EXPECT_NO_THROW(config.validate());
+    }
+    for (const auto& endpoint : {"http://example.com/decisions", "ftp://localhost/decisions", "not-url",
+         "https://secret@example.com/decisions", "https://example.com/#secret", "http://localhost.evil/decisions"}) {
+        PermissionVerifierConfig config{.endpoint = endpoint};
+        EXPECT_THROW(config.validate(), std::invalid_argument);
+    }
+    PermissionVerifierConfig config;
+    config.model = "";
+    EXPECT_THROW(config.validate(), std::invalid_argument);
+}
+
+TEST(PermissionVerifierHttpTest, SendsOpenAIDecisionsInputAndNamedChoice) {
+    AuthHttpServer server({R"({"answers":[{"name":"permission","type":"choice","choice":"allow","confidence":0.01,"probabilities":[{"value":"allow","probability":0.9},{"value":"deny","probability":0.1}]}]})"});
+    PermissionVerifier verifier("fake-decision-key", PermissionVerifierConfig{
+        DecisionProtocol::OPENAI_DECISIONS, server.url + "/v1/decisions", "custom-model"});
+    ToolPermissionRequest request{"bash", {}, {}, {{"arguments", {{"command", "true"}}}}, "c", "bash"};
+    EXPECT_EQ(verifier.verify(request, "/workspace", "Build", {}), 0.9);
+    const auto requests = server.worker.get();
+    ASSERT_EQ(requests.size(), 1);
+    EXPECT_NE(requests[0].find("POST /v1/decisions"), std::string::npos);
+    EXPECT_NE(requests[0].find("Authorization: Bearer fake-decision-key"), std::string::npos);
+    const auto body = Json::parse(requests[0].substr(requests[0].find("\r\n\r\n") + 4));
+    EXPECT_EQ(body["model"], "custom-model");
+    EXPECT_EQ(body["input"][0]["content"][0]["type"], "input_json");
+    EXPECT_EQ(body["input"][0]["content"][0]["data"]["recent_user_request"], "Build");
+    EXPECT_EQ(body["questions"][0]["name"], "permission");
+    EXPECT_EQ(body["questions"][0]["choices"].size(), 2);
+    EXPECT_FALSE(body.contains("state"));
+}
+
+TEST(PermissionVerifierHttpTest, RedirectNeverForwardsCredentialsAndNetworkFailureDoesNotAuthorize) {
+    AuthHttpServer target({});
+    AuthHttpServer source({""}, {307}, false, {}, "Location: " + target.url + "/stolen\r\n");
+    ToolPermissionRequest request{"bash", {}, {}, {{"arguments", {{"command", "true"}}}}, "c", "bash"};
+    PermissionVerifier verifier("fake-key", source.url);
+    EXPECT_THROW(verifier.verify(request, "/workspace", "test", {}), std::runtime_error);
+    EXPECT_EQ(source.worker.get().size(), 1);
+    EXPECT_FALSE(target.hasPendingRequest());
+    EXPECT_TRUE(target.worker.get().empty());
+    PermissionVerifier unavailable("fake-key", "http://127.0.0.1:1/v1/decisions");
+    EXPECT_THROW(unavailable.verify(request, "/workspace", "test", {}), std::runtime_error);
+}
+
+TEST(PermissionVerifierHttpTest, CancellationInterruptsAStalledDecision) {
+    AuthHttpServer server({""}, {}, true);
+    PermissionVerifier verifier("fake-key", server.url);
+    ToolPermissionRequest request{"bash", {}, {}, {{"arguments", {{"command", "true"}}}}, "c", "bash"};
+    std::atomic<bool> cancelled{false};
+    auto entered = server.entered.get_future();
+    auto result = std::async(std::launch::async, [&] {
+        return verifier.verify(request, "/workspace", "test", [&] { return cancelled.load(); });
+    });
+    EXPECT_EQ(entered.wait_for(std::chrono::seconds(3)), std::future_status::ready);
+    cancelled = true;
+    EXPECT_THROW(result.get(), core::Cancelled);
+}
+
+TEST(PermissionVerifierHttpTest, SavedModelAndCredentialAreSnapshottedTogetherAndUseProbability) {
+    TempAuth temp;
+    auto auth = std::make_shared<AuthStore>(temp.directory / "auth.json");
+    ProviderConnections connections(auth, temp.directory / "config.json");
+    AuthHttpServer server({R"({"answers":[{"name":"permission","type":"choice","choice":"allow","confidence":0.01,"probabilities":[{"value":"allow","probability":0.95},{"value":"deny","probability":0.05}]}]})"});
+    PermissionVerifierConfig model{DecisionProtocol::OPENAI_DECISIONS, server.url + "/v1/decisions", "first-model"};
+    connections.savePermissionSettings(PermissionMode::AUTO, 95, model, "first-key");
+    const auto snapshot = connections.permissionVerifier(temp.directory.string(), "Build");
+    model.endpoint = "http://127.0.0.1:1/v1/decisions";
+    model.model = "second-model";
+    connections.savePermissionSettings(PermissionMode::AUTO, 95, model, "second-key");
+    PermissionManager manager([](auto) {});
+    manager.configure(temp.directory, ExecutionMode::SLOP);
+    manager.setPermissionMode(PermissionMode::AUTO, snapshot, 95);
+    ToolPermissionRequest request{"bash", {}, {}, {{"arguments", {{"command", "true"}}}}, "c", "bash"};
+    EXPECT_EQ(manager.ask(request, [] {}).decision, PermissionDecision::AI_ACCEPTED);
+    const auto requests = server.worker.get();
+    ASSERT_EQ(requests.size(), 1);
+    EXPECT_NE(requests[0].find("Bearer first-key"), std::string::npos);
+    EXPECT_EQ(requests[0].find("second-key"), std::string::npos);
+    EXPECT_NE(requests[0].find("first-model"), std::string::npos);
+    manager.setMode(ExecutionMode::SANE);
+    EXPECT_THROW(manager.ask(request, [] {}), std::runtime_error);
 }
 
 TEST(ApiKeyValidationTest, RejectsBadKeysAndServerErrorsBeforeReplacingSavedCredentials) {

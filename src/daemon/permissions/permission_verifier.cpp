@@ -3,6 +3,8 @@
 #include <agent-runtime/providers/provider_http.hpp>
 #include <cmath>
 #include <filesystem>
+#include <curl/curl.h>
+#include <memory>
 
 namespace {
 constexpr std::size_t MAX_STATE_BYTES = 48000;
@@ -36,32 +38,117 @@ nlohmann::json fileDetails(const ToolPermissionRequest& request) {
 }
 }  // namespace
 
-PermissionVerifier::PermissionVerifier(std::string key, std::string endpoint)
-    : key(std::move(key)), endpoint(std::move(endpoint)) {}
-
-std::optional<double> PermissionVerifier::runConfidence(const nlohmann::json& response) {
-  if (response.contains("error")) return std::nullopt;
-  const auto answers = response.find("answers");
-  if (answers == response.end() || !answers->is_object()) return std::nullopt;
-  const auto answer = answers->find("permission");
-  if (answer == answers->end() || !answer->is_object() ||
-      answer->value("type", "") != "choice") return std::nullopt;
-  const auto choice = answer->value("choice", "");
-  if (choice != "allow" && choice != "deny") return std::nullopt;
-  const auto confidence = answer->find("confidence");
-  if (confidence == answer->end() || !confidence->is_number()) return std::nullopt;
-  const double value = confidence->get<double>();
-  if (!std::isfinite(value) || value < 0 || value > 1) return std::nullopt;
-  // Remove subtraction noise (deny 0.8 must reach the 20% boundary exactly).
-  // Twelve decimal places retain far more precision than the integer setting.
-  const auto score = choice == "allow" ? value : 1.0 - value;
-  return std::round(score * 1e12) / 1e12;
+const char* decisionProtocolName(DecisionProtocol protocol) {
+  switch (protocol) {
+    case DecisionProtocol::TYPESAFE: return "typesafe";
+    case DecisionProtocol::OPENAI_DECISIONS: return "openai_decisions";
+  }
+  throw std::invalid_argument("Invalid decision protocol");
 }
 
-bool PermissionVerifier::allows(const nlohmann::json& response, int threshold) {
-  if (threshold < 0 || threshold > 100) throw std::invalid_argument("Confidence must be between 0 and 100");
+void to_json(nlohmann::json& json, const PermissionVerifierConfig& config) {
+  json = {{"protocol", decisionProtocolName(config.protocol)}, {"endpoint", config.endpoint}, {"model", config.model}};
+}
+
+void from_json(const nlohmann::json& json, PermissionVerifierConfig& config) {
+  try {
+    if (!json.is_object() || json.size() != 3) throw std::invalid_argument("Invalid AI Check configuration");
+    const auto protocol = json.at("protocol").get<std::string>();
+    if (protocol == "typesafe") config.protocol = DecisionProtocol::TYPESAFE;
+    else if (protocol == "openai_decisions") config.protocol = DecisionProtocol::OPENAI_DECISIONS;
+    else throw std::invalid_argument("Invalid decision protocol");
+    config.endpoint = json.at("endpoint").get<std::string>();
+    config.model = json.at("model").get<std::string>();
+    config.validate();
+  } catch (const nlohmann::json::exception&) {
+    throw std::invalid_argument("Invalid AI Check configuration");
+  }
+}
+
+void PermissionVerifierConfig::validate() const {
+  if (protocol != DecisionProtocol::TYPESAFE && protocol != DecisionProtocol::OPENAI_DECISIONS)
+    throw std::invalid_argument("Invalid decision protocol");
+  if (model.empty() || model.size() > 256 || model.find_first_of(" \t\r\n") != std::string::npos ||
+      model.find('\0') != std::string::npos)
+    throw std::invalid_argument("Invalid decision model ID");
+  if (endpoint.empty() || endpoint.size() > 4096 || endpoint.find_first_of(" \t\r\n") != std::string::npos ||
+      endpoint.find('\0') != std::string::npos)
+    throw std::invalid_argument("Invalid decision endpoint");
+  std::unique_ptr<CURLU, decltype(&curl_url_cleanup)> url(curl_url(), curl_url_cleanup);
+  if (!url || curl_url_set(url.get(), CURLUPART_URL, endpoint.c_str(), 0) != CURLUE_OK)
+    throw std::invalid_argument("Invalid decision endpoint");
+  const auto part = [&](CURLUPart name) {
+    char* raw = nullptr;
+    if (curl_url_get(url.get(), name, &raw, 0) != CURLUE_OK) return std::string{};
+    std::unique_ptr<char, decltype(&curl_free)> memory(raw, curl_free);
+    return std::string(raw);
+  };
+  const auto scheme = part(CURLUPART_SCHEME), host = part(CURLUPART_HOST);
+  if (host.empty() || (scheme != "https" && !(scheme == "http" &&
+      (host == "localhost" || host == "127.0.0.1" || host == "[::1]"))))
+    throw std::invalid_argument("Decision endpoint requires HTTPS, or HTTP on loopback");
+  if (!part(CURLUPART_USER).empty() || !part(CURLUPART_PASSWORD).empty() ||
+      endpoint.find('#') != std::string::npos || endpoint.find('@') != std::string::npos)
+    throw std::invalid_argument("Decision endpoint must not contain credentials or a fragment");
+}
+
+PermissionVerifier::PermissionVerifier(std::string key, std::string endpoint)
+    : PermissionVerifier(std::move(key), PermissionVerifierConfig{.endpoint = std::move(endpoint)}) {}
+
+PermissionVerifier::PermissionVerifier(std::string key, PermissionVerifierConfig config)
+    : key(std::move(key)), config(std::move(config)) { this->config.validate(); }
+
+std::optional<double> PermissionVerifier::allowProbability(const nlohmann::json& response,
+                                                         DecisionProtocol protocol) {
+  using Json = nlohmann::json;
+  if (!response.is_object() || response.contains("error")) return std::nullopt;
+  const auto answers = response.find("answers");
+  if (answers == response.end() || answers->size() != 1) return std::nullopt;
+  const Json* answer = nullptr;
+  if (protocol == DecisionProtocol::TYPESAFE) {
+    if (!answers->is_object() || !answers->contains("permission")) return std::nullopt;
+    answer = &answers->at("permission");
+  } else if (protocol == DecisionProtocol::OPENAI_DECISIONS) {
+    if (!answers->is_array() || !answers->at(0).is_object() ||
+        answers->at(0).value("name", Json{}) != "permission") return std::nullopt;
+    answer = &answers->at(0);
+  } else return std::nullopt;
+  if (!answer->is_object() || answer->value("type", Json{}) != "choice") return std::nullopt;
+  const auto choice = answer->value("choice", Json{});
+  if (choice != "allow" && choice != "deny") return std::nullopt;
+  const auto probabilities = answer->find("probabilities");
+  if (probabilities == answer->end() || probabilities->size() != 2) return std::nullopt;
+  Json distribution = Json::object();
+  if (protocol == DecisionProtocol::TYPESAFE) {
+    if (!probabilities->is_object()) return std::nullopt;
+    distribution = *probabilities;
+  } else {
+    if (!probabilities->is_array()) return std::nullopt;
+    for (const auto& entry : *probabilities) {
+      if (!entry.is_object() || !entry.contains("value") || !entry.at("value").is_string() ||
+          !entry.contains("probability")) return std::nullopt;
+      const auto name = entry.at("value").get<std::string>();
+      if ((name != "allow" && name != "deny") || distribution.contains(name)) return std::nullopt;
+      distribution[name] = entry.at("probability");
+    }
+  }
+  for (const auto* name : {"allow", "deny"}) {
+    if (!distribution.contains(name) || !distribution.at(name).is_number()) return std::nullopt;
+    const auto value = distribution.at(name).get<double>();
+    if (!std::isfinite(value) || value < 0 || value > 1) return std::nullopt;
+  }
+  const double allow = distribution.at("allow"), deny = distribution.at("deny");
+  constexpr double SUM_TOLERANCE = 1e-6;
+  if (std::abs(allow + deny - 1.0) > SUM_TOLERANCE ||
+      (choice == "allow" && allow < deny) || (choice == "deny" && deny < allow)) return std::nullopt;
+  // Preserve the supplied probability: rounding must not authorize just below a threshold.
+  return allow;
+}
+
+bool PermissionVerifier::allows(const nlohmann::json& response, int threshold, DecisionProtocol protocol) {
+  if (threshold < 0 || threshold > 100) throw std::invalid_argument("Probability must be between 0 and 100");
   if (threshold == 0) return true;
-  const auto score = runConfidence(response);
+  const auto score = allowProbability(response, protocol);
   return score && *score >= threshold / 100.0;
 }
 
@@ -136,13 +223,23 @@ std::optional<double> PermissionVerifier::verify(const ToolPermissionRequest& re
         {"deny",
          "A concrete risk to the machine, production systems, personal data, "
          "unrelated work or security."}}}};
-  const nlohmann::json body = {{"model", "typesafe/jev-1.13"},
-                               {"state", state},
-                               {"questions", {{"permission", question}}}};
+  nlohmann::json body;
+  if (config.protocol == DecisionProtocol::TYPESAFE) {
+    body = {{"model", config.model}, {"state", state}, {"questions", {{"permission", question}}}};
+  } else {
+    auto openaiQuestion = nlohmann::json{{"type", "choice"}, {"name", "permission"},
+      {"instructions", question.at("instructions")}, {"choices", nlohmann::json::array()}};
+    for (const auto& [value, description] : question.at("criteria").items())
+      openaiQuestion["choices"].push_back({{"value", value}, {"description", description}});
+    body = {{"model", config.model},
+      {"input", nlohmann::json::array({{{"role", "user"}, {"content", nlohmann::json::array({
+        {{"type", "input_json"}, {"data", state}}})}}})},
+      {"questions", nlohmann::json::array({openaiQuestion})}};
+  }
   const auto response = postProviderResponse(
-      endpoint, key, {{"Content-Type", "application/json"}}, body, cancelled,
+       config.endpoint, key, {{"Content-Type", "application/json"}}, body, cancelled,
       "Permission verifier",
       {.total = std::chrono::seconds(30), .idle = std::chrono::seconds(15)});
   core::checkCancellation(cancelled);
-  return runConfidence(nlohmann::json::parse(response));
+  return allowProbability(nlohmann::json::parse(response, nullptr, false), config.protocol);
 }
