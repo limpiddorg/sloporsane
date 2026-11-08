@@ -310,7 +310,7 @@ TEST_F(McpManagerTest, AdapterChecksPermissionsBeforeCallingOrStartingACheckpoin
     ASSERT_EQ(tools.size(), 1);
     ToolContext context{workspace, workspace};
     bool checkpoint = false;
-    context.mutateFiles = [&](const auto& paths, const auto& action) {
+    context.mutateFiles = [&](const auto& paths, const auto& action, const auto&) {
         EXPECT_TRUE(paths.empty());
         checkpoint = true;
         action();
@@ -403,7 +403,7 @@ TEST_F(McpManagerTest, AdapterConvertsStructuredOutputAndReportsErrorsWithoutRep
     EXPECT_EQ(tools.front()->execute(Json::object(), context).output, "{\"answer\":42}\n");
     peer->response = {{"content", Json::array({{{"type", "text"}, {"text", "tool failed"}}})}, {"isError", true}};
     bool checkpointCompleted = false;
-    context.mutateFiles = [&](const auto&, const auto& action) {
+    context.mutateFiles = [&](const auto&, const auto& action, const auto&) {
         try { action(); }
         catch (...) { checkpointCompleted = true; throw; }
     };
@@ -429,7 +429,7 @@ TEST_F(McpManagerTest, RemoteResultsKeepImagesSeparateAndNeverFetchResourceLinks
     auto tools = mcp::makeTools(manager);
     ToolContext context{workspace, workspace};
     context.ask = [](const auto&) {};
-    context.mutateFiles = [](const auto&, const auto&) { FAIL() << "Remote effects cannot be snapshotted"; };
+    context.mutateFiles = [](const auto&, const auto&, const auto&) { FAIL() << "Remote effects cannot be snapshotted"; };
     peer->response = {{"content", Json::array({
         {{"type", "image"}, {"mimeType", "image/png"}, {"data",
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6a0AAAAASUVORK5CYII="}},

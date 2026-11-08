@@ -129,9 +129,31 @@ Les interactions TUI décrites ici visent Python/Textual, pas une obligation de 
 - Conserver sélection et diff pendant les mises à jour live. Le retour sur une substep
   restaure sa zone de diff (fichier/hunk), mémorisée uniquement dans la TUI par version
   et substep, jamais dans la session. La navigation garde la ligne sélectionnée visible
-  par le défilement minimal, sans mouvement si la sélection ne change pas.
+   par le défilement minimal, sans mouvement si la sélection ne change pas.
   Le menu plan/steps/Conclusion utilise un seul scroll externe, pas de scroll interne des steps.
-  PgUp/PgDown font défiler le panneau de contenu affiché (diff, texte du step, plan,
+- Les diffs historiques restent navigables dans le fichier complet. Le premier affichage
+  n'attend pas sa coloration syntaxique complète ; celle-ci se prépare hors du thread UI
+  avec l'état lexical du document entier. Partager les mesures et lignes repliées entre
+  hunks du même contenu historique et de même largeur, sans déplacer le scroll lors de
+  l'arrivée des couleurs ni lire le checkout courant.
+- Seules les lignes ajoutées/supprimées du hunk courant ont leur gouttière MISC sur le
+  même fond gris que les flèches Version des Steps (`#3A4655`), jamais ses lignes
+  de contexte. Ne pas changer les signes `+`/`-` ni les
+  fonds verts/rouges du code. Deux colonnes d'espace après le signe appartiennent au
+  fond du code, pas à la gouttière ; aligner aussi le contexte et les continuations.
+- Au-dessus de la diff, afficher par défaut son explication dans un petit panneau avec
+  séparateur. `E` le masque/réaffiche seulement quand le chat est fermé ; afficher alors
+  `E Toggle explanation` à droite du filepath, sur la même ligne, pas dans l'aide du bas.
+  Conserver ce choix
+  pendant la navigation ; ne pas afficher le panneau sur les plans et résumés de steps.
+  Les anciennes diffs sans texte indiquent explicitement l'absence d'explication.
+- En exécution Implement, `edit`, `write` et `apply_patch` exigent une explication non vide,
+  capturée avec la mutation, sans nouvel outil ni appel modèle. Le modèle peut réutiliser
+  un texte pertinent pour des éditions similaires. Après review, il réécrit une synthèse
+  de tout l'état actuel de la diff, changements précédents conservés compris. Une correction
+  remplace le texte du hunk concerné ; une fusion conserve les explications des autres hunks
+  en les séparant par un saut de ligne. Préserver ces textes dans les versions historiques.
+- PgUp/PgDown font défiler le panneau de contenu affiché (diff, texte du step, plan,
   conclusion), indépendamment du focus ; si la review est ouverte via Tab, ils ciblent
   son chat à la place.
 - Montrer dès le début tous les titres numérotés des substeps prévues ; activité/explication
@@ -149,6 +171,10 @@ Les interactions TUI décrites ici visent Python/Textual, pas une obligation de 
   pas aux substeps de construction ; les lectures nécessaires à l'implémentation restent
   permises. Les réparations de validation ciblent les substeps d'origine. Capturer l'appartenance pendant les mutations/frontières, sans
    redistribution globale des hunks finale ni perte des contributions inchangées.
+  Si une capture de validation échoue après avoir laissé des changements sans propriétaire,
+  une déclaration `correcting` valide peut rattacher cet intervalle en attente à sa cible
+  explicite, y compris après reprise. Ne pas réattribuer les contributions déjà capturées ;
+  mutation et clôture sans cible restent refusées tant que cet intervalle n'est pas récupéré.
 - Garder la validation proportionnée aux changements du step et aux exigences explicites
   du plan. Réutiliser les résultats réussis encore valides ; pas de relecture globale ni
   de répétition de contrôles sans incertitude ou risque de régression concret. Après une

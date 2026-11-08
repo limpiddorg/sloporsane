@@ -9,12 +9,13 @@ void from_json(const nlohmann::json& json, WriteArguments& value) {
 }
 
 ToolDefinition WriteTool::getDefinition() const {
-    return {"write", "Write a file, creating parent directories as needed. Replaces the entire content of an existing file. Read existing files before overwriting them; prefer edit for targeted changes.",
+    return fs_tools::withExplanation({"write", "Write a file, creating parent directories as needed. Replaces the entire content of an existing file. Read existing files before overwriting them; prefer edit for targeted changes.",
         {{"type", "object"}, {"properties", {{"filePath", {{"type", "string"}}}, {"content", {{"type", "string"}}}}},
-            {"required", {"filePath", "content"}}}};
+            {"required", {"filePath", "content"}}}}, explained);
 }
 
 ToolResult WriteTool::execute(const nlohmann::json& arguments, const ToolContext& context) const {
+    const auto explanation = fs_tools::explanation(arguments, explained);
     const auto params = arguments.get<WriteArguments>();
     const auto path = fs_tools::resolve(context, params.filePath);
     fs_tools::checkExternal(context, path);
@@ -30,7 +31,7 @@ ToolResult WriteTool::execute(const nlohmann::json& arguments, const ToolContext
     fs_tools::checkpoint(context);
     if (std::filesystem::exists(path) != exists || (exists && fs_tools::readText(path) != before))
         throw std::runtime_error("File changed while awaiting permission: " + path.string());
-    fs_tools::mutate(context, {path}, [&] { fs_tools::writeText(path, after); });
+    fs_tools::mutate(context, {path}, [&] { fs_tools::writeText(path, after); }, explanation);
     return {fs_tools::relative(context, path), "Wrote file successfully.",
         {{"filepath", path.string()}, {"exists", exists}, {"diff", diff}}, {}};
 }

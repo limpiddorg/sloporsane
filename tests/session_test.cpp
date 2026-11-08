@@ -1535,6 +1535,28 @@ TEST_F(SessionTest, ImplementationCapturedOwnershipPreservesDeletionNoNewlineAnd
     EXPECT_TRUE(metadata[0].empty()); EXPECT_EQ(metadata[1][0].patch, binary.diffs[0].patch);
 }
 
+TEST_F(SessionTest, ImplementationNewFileRewritePreservesOrderAndReplacesItsExplanation) {
+    const auto diff = [](const std::string& before, const std::string& after, const std::string& explanation) {
+        return ImplementationDiff{"new.cpp", fs_tools::diff("new.cpp", before, after), before, after, {}, {explanation}};
+    };
+    ImplementationBoundary initial, corrected;
+    initial.owner = corrected.owner = 0;
+    initial.diffs = {diff("", "first", "Initial new file")};
+    corrected.diffs = {diff("first", "corrected", "Complete corrected new file")};
+    const auto original = preserveImplementationOwnership({initial}, initial.diffs, 1)[0][0];
+    const auto result = preserveImplementationOwnership({initial, corrected}, {diff("", "corrected", "")}, 1)[0][0];
+    EXPECT_EQ(result.hunkOrder, original.hunkOrder);
+    EXPECT_EQ(result.hunkExplanations, (std::vector<std::string>{"Complete corrected new file"}));
+    ImplementationBoundary removed;
+    removed.owner = 0; removed.diffs = {diff("old\n", "", "Remove the obsolete file")};
+    EXPECT_EQ(preserveImplementationOwnership({removed}, removed.diffs, 1)[0][0].hunkExplanations,
+        (std::vector<std::string>{"Remove the obsolete file"}));
+    ImplementationBoundary binary;
+    binary.owner = 0; binary.diffs = {{"image", "Binary contents changed", "", "", {}, {"Update the image"}}};
+    EXPECT_EQ(preserveImplementationOwnership({binary}, binary.diffs, 1)[0][0].hunkExplanations,
+        (std::vector<std::string>{"Update the image"}));
+}
+
 namespace {
 class ImplementationDiffOrderTest : public ::testing::Test {
 protected:
@@ -1612,6 +1634,43 @@ TEST_F(ImplementationDiffOrderTest, NearbyRepairBridgesHunksAtTheOldestPosition)
     ASSERT_EQ(merged.hunkOrder.size(), 1);
     EXPECT_EQ(merged.hunkOrder[0], z.hunkOrder[0]);
     EXPECT_LT(merged.hunkOrder[0], file(after, "a.cpp").hunkOrder[0]);
+}
+
+TEST_F(ImplementationDiffOrderTest, ExplanationsFollowHunksAndCorrectionsReplaceTheirWholeSynthesis) {
+    replace("file.cpp", "line 5\n", "first change\n");
+    evidence.back().diffs[0].hunkExplanations = {"First intention"};
+    replace("file.cpp", "line 70\n", "second change\n");
+    evidence.back().diffs[0].hunkExplanations = {"Second intention"};
+    const auto before = file(result(), "file.cpp");
+    EXPECT_EQ(before.hunkExplanations, (std::vector<std::string>{"First intention", "Second intention"}));
+    replace("file.cpp", "first change\n", "corrected first change\n");
+    evidence.back().diffs[0].hunkExplanations = {"Complete corrected first intention"};
+    const auto corrected = file(result(), "file.cpp");
+    EXPECT_EQ(corrected.hunkExplanations, (std::vector<std::string>{"Complete corrected first intention", "Second intention"}));
+    EXPECT_EQ(json(corrected).get<ImplementationDiff>().hunkExplanations, corrected.hunkExplanations);
+    EXPECT_EQ(before.hunkExplanations[0], "First intention");
+}
+
+TEST_F(ImplementationDiffOrderTest, MergedHunksJoinTheirExplanationsWithNewlines) {
+    replace("file.cpp", "line 30\n", "first\n");
+    evidence.back().diffs[0].hunkExplanations = {"First intention"};
+    replace("file.cpp", "line 40\n", "second\n");
+    evidence.back().diffs[0].hunkExplanations = {"Second intention"};
+    replace("file.cpp", "line 35\n", "bridge\n");
+    evidence.back().diffs[0].hunkExplanations = {"Bridge intention"};
+    const auto merged = file(result(), "file.cpp");
+    EXPECT_EQ(merged.hunkExplanations, (std::vector<std::string>{"First intention\nSecond intention\nBridge intention"}));
+}
+
+TEST_F(ImplementationDiffOrderTest, RepeatedExplanationsAndOtherSubstepsDoNotPolluteAHunk) {
+    replace("file.cpp", "line 5\n", "first\n", 0);
+    evidence.back().diffs[0].hunkExplanations = {"Rename the variable"};
+    replace("file.cpp", "line 7\n", "second\n", 0);
+    evidence.back().diffs[0].hunkExplanations = {"Rename the variable"};
+    replace("file.cpp", "line 6\n", "wiring\n", 1);
+    evidence.back().diffs[0].hunkExplanations = {"Wire the result"};
+    EXPECT_EQ(file(result(0, 2), "file.cpp").hunkExplanations, (std::vector<std::string>{"Rename the variable"}));
+    EXPECT_EQ(file(result(1, 2), "file.cpp").hunkExplanations, (std::vector<std::string>{"Wire the result"}));
 }
 
 TEST_F(ImplementationDiffOrderTest, RevertedZoneDisappearsAndRecreatedZoneGetsANewPosition) {
@@ -1966,6 +2025,62 @@ TEST_F(SessionTest, ImplementationValidationRequiresDeclaredRepairTargetAndAllSu
     EXPECT_THROW(boundaries.capture(0, 2, {0, "correcting", ""}, empty), std::logic_error);
 }
 
+TEST_F(SessionTest, ImplementationValidationCanRecoverUnownedChangesWithAnExplicitRepairTarget) {
+    const auto path = directory / "unowned-validation"; fs::create_directory(path);
+    const auto target = directory / "model.txt";
+    std::ofstream(target) << "base\n";
+    TurnFiles first(path); first.begin(first.prepare(directory, directory));
+    ImplementationRun run(path); run.start(implementationPlan().get<ImplementationPlan>(), "step_by_step");
+    run.begin(first.boundary());
+    ImplementationBoundaries boundaries(path);
+    boundaries.capture(0, 2, {0, "started", "Build model"}, first.boundary());
+    first.mutate({target}, [&] { std::ofstream(target) << "built\n"; });
+    boundaries.capture(0, 2, {0, "completed", "Built model"}, first.boundary());
+    boundaries.capture(0, 2, {1, "unnecessary", "No wiring needed"}, first.boundary());
+    boundaries.capture(0, 2, {{}, "validating", "Run checks"}, first.boundary());
+    const auto saved = boundaries.read(0);
+    // A validation command can leave changes before capture rejects its outcome.
+    EXPECT_THROW(first.mutate({target}, [&] { std::ofstream(target) << "pending repair\n"; },
+        [&](const auto& snapshot) { boundaries.capture(0, 2, {{}, "mutation", ""}, snapshot); }), std::logic_error);
+    EXPECT_EQ(boundaries.read(0).size(), saved.size());
+    EXPECT_THROW(boundaries.capture(0, 2, {{}, "finished", "Done"}, first.boundary()), std::logic_error);
+    EXPECT_THROW(boundaries.capture(0, 2, {1, "started", "Wrong phase"}, first.boundary()), std::logic_error);
+    EXPECT_THROW(boundaries.capture(0, 2, {2, "correcting", "Unknown target"}, first.boundary()), std::invalid_argument);
+    EXPECT_EQ(boundaries.read(0).size(), saved.size());
+    first.finish();
+    run.finish(first.boundary(), {}, {}, false, "Validation interrupted");
+    ImplementationRun resumed(path); resumed.resume();
+    const auto baseline = resumed.baseline().value();
+    TurnFiles second(path); second.begin(second.prepare(directory, directory));
+    resumed.begin(second.boundary());
+    const auto combined = [&] {
+        auto snapshot = second.boundary(); snapshot.before = baseline.before;
+        snapshot.edits.insert(snapshot.edits.begin(), baseline.edits.begin(), baseline.edits.end());
+        return snapshot;
+    };
+    ASSERT_NO_THROW(boundaries.capture(0, 2, {1, "correcting", "Recover pending wiring repair"}, combined()));
+    const auto recovered = ImplementationBoundaries(path).read(0);
+    ASSERT_EQ(recovered.size(), saved.size() + 1);
+    for (std::size_t index = 0; index < saved.size(); ++index)
+        EXPECT_EQ(json(recovered[index]), json(saved[index]));
+    const auto& repair = recovered.back();
+    EXPECT_EQ(repair.owner, 1);
+    EXPECT_EQ(repair.activeSubstep, 1);
+    EXPECT_TRUE(repair.validating);
+    ASSERT_EQ(repair.diffs.size(), 1);
+    EXPECT_EQ(repair.diffs[0].before, "built\n");
+    EXPECT_EQ(repair.diffs[0].after, "pending repair\n");
+    EXPECT_NO_THROW(boundaries.requireActiveSubstep(0));
+    second.mutate({target}, [&] { std::ofstream(target) << "fixed\n"; });
+    boundaries.capture(0, 2, {1, "completed", "Repaired"}, combined());
+    EXPECT_THROW(boundaries.requireActiveSubstep(0), std::logic_error);
+    // A read-only check needs no repair target after recovery.
+    EXPECT_NO_THROW(boundaries.requireActiveSubstep(0, true));
+    EXPECT_NO_THROW(boundaries.capture(0, 2, {{}, "mutation", ""}, combined()));
+    EXPECT_NO_THROW(boundaries.capture(0, 2, {{}, "finished", "Checks passed"}, combined()));
+    second.finish();
+}
+
 TEST_F(SessionTest, ImplementationInterruptedRepairResumesWithUnclosedExternalEdits) {
     const auto path = directory / "resumed-boundaries"; fs::create_directory(path);
     const auto target = directory / "outside.txt";
@@ -2301,7 +2416,8 @@ TEST_F(SessionTest, ImplementationEverythingWritesPreservesExactDiffsAndReviewCa
         if (call == 1 || call == 2 || call == 5) {
             result["output"][0]["name"] = "write";
             result["output"][0]["arguments"] = json{{"filePath", "state.txt"},
-                {"content", "increment-" + std::to_string(call == 5 ? 3 : call) + "\n"}}.dump();
+                {"content", "increment-" + std::to_string(call == 5 ? 3 : call) + "\n"},
+                {"explanation", "Current model increment " + std::to_string(call == 5 ? 3 : call)}}.dump();
             const auto write = result["output"][0];
             if (call == 1) result["output"] = json::array({progress(0, "started"), write});
             if (call == 2) result["output"] = json::array({progress(0, "completed"), progress(1, "started"), progress(1, "completed"),
@@ -2370,6 +2486,8 @@ TEST_F(SessionTest, ImplementationEverythingWritesPreservesExactDiffsAndReviewCa
                 const auto patch = built.at("steps")[0].at("substeps")[0].at("diffs")[0].at("patch").get<std::string>();
                 EXPECT_NE(patch.find("-original"), std::string::npos);
                 EXPECT_NE(patch.find("+increment-2"), std::string::npos);
+                EXPECT_EQ(built.at("steps")[0].at("substeps")[0].at("diffs")[0].at("hunk_explanations"),
+                    json::array({"Current model increment 2"}));
                 const auto whole = built.at("steps")[0].at("whole").at("diffs")[0].at("patch").get<std::string>();
                 EXPECT_NE(whole.find("-original"), std::string::npos);
                 EXPECT_NE(whole.find("+increment-2"), std::string::npos);
@@ -2556,7 +2674,8 @@ void SessionTest::exerciseReviewRework(const std::string& pace, bool revisePlan,
                 EXPECT_NE(input.dump().find("REVIEW_DECISION_DETAIL"), std::string::npos);
             }
             result["output"] = json::array({progress(0, call == 1 || partial ? "started" : "correcting"),
-                tool("write", {{"filePath", partial ? "successor.txt" : "state.txt"}, {"content", call == 1 || partial ? "built\n" : "corrected\n"}}, "write"), progress(0, "completed")});
+                tool("write", {{"filePath", partial ? "successor.txt" : "state.txt"}, {"content", call == 1 || partial ? "built\n" : "corrected\n"},
+                    {"explanation", call == 1 || partial ? "Initial model explanation" : "Complete corrected model explanation"}}, "write"), progress(0, "completed")});
             if (partial) return result;
             if (call == 1) result["output"].push_back(progress(1, "unnecessary"));
             if (call > 1) {
@@ -2667,6 +2786,8 @@ void SessionTest::exerciseReviewRework(const std::string& pace, bool revisePlan,
                 EXPECT_FALSE(corrected.at("steps")[0].at("whole").at("reviewed"));
                 const auto patch = corrected.at("steps")[0].at("whole").at("diffs")[0].at("patch").get<std::string>();
                 EXPECT_NE(patch.find("-original"), std::string::npos); EXPECT_NE(patch.find("+corrected"), std::string::npos);
+                EXPECT_EQ(corrected.at("steps")[0].at("substeps")[0].at("diffs")[0].at("hunk_explanations"),
+                    json::array({"Complete corrected model explanation"}));
                 EXPECT_EQ(corrected.at("work_step"), activeSuccessor ? 2 : 1); break;
             }
         }
@@ -2681,6 +2802,8 @@ void SessionTest::exerciseReviewRework(const std::string& pace, bool revisePlan,
             EXPECT_FALSE(versions[0].at("accepted_plan_markdown").get<std::string>().empty());
             EXPECT_EQ(versions[0].at("status"), "archived");
             EXPECT_FALSE(versions[0].at("steps")[0].at("substeps")[0].contains("snapshot"));
+            EXPECT_EQ(versions[0].at("steps")[0].at("substeps")[0].at("diffs")[0].at("hunk_explanations"),
+                json::array({"Initial model explanation"}));
             break;
         }
         std::ifstream untouched(directory / "state.txt"); EXPECT_EQ(std::string(std::istreambuf_iterator<char>(untouched), {}), "original\n");

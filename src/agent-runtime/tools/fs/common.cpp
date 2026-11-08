@@ -7,6 +7,23 @@
 
 namespace fs_tools {
 namespace fs = std::filesystem;
+ToolDefinition withExplanation(ToolDefinition definition, bool required) {
+    if (!required) return definition;
+    definition.parameters["properties"]["explanation"] = {{"type", "string"}, {"minLength", 1},
+        {"description", "Briefly explain what this diff does and why. Reuse the same text across similar edits when useful. "
+            "When correcting a reviewed diff, rewrite a complete synthesis of its current state: include earlier changes still present, not just this correction."}};
+    definition.parameters["required"].push_back("explanation");
+    return definition;
+}
+
+std::string explanation(const nlohmann::json& arguments, bool required) {
+    if (!required) return {};
+    if (!arguments.contains("explanation") || !arguments.at("explanation").is_string() ||
+        trim(arguments.at("explanation").get<std::string>()).empty())
+        throw std::invalid_argument("explanation is required and must be a nonempty string");
+    return arguments.at("explanation").get<std::string>();
+}
+
 namespace {
 bool contains(const fs::path& root, const fs::path& path) {
     auto p = path.begin();

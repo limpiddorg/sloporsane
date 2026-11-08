@@ -1876,8 +1876,8 @@ class ImplementationWorkspaceTest(unittest.IsolatedAsyncioTestCase):
     async def test_code_has_colored_addition_and_deletion_glyphs(self):
         await self.pilot.press("enter")
         text = self.workspace.query_one("#implementation-patch", Static).render()
-        self.assertIn("- old", str(text))
-        self.assertIn("+ new", str(text))
+        self.assertIn("-  old", str(text))
+        self.assertIn("+  new", str(text))
         self.assertTrue(any(span.style.foreground and span.style.foreground.hex == SLOP_COLOR and "-" in str(text)[span.start:span.end] for span in text.spans))
         self.assertTrue(any(span.style.foreground and span.style.foreground.hex == ALGAE_MD and "+" in str(text)[span.start:span.end] for span in text.spans))
 
@@ -3502,3 +3502,86 @@ class ImplementationWorkspaceTest(unittest.IsolatedAsyncioTestCase):
         await self.pilot.resize_terminal(85, 25)
         await self.pilot.pause()
         self.assertEqual(code.max_scroll_x, 0)
+
+    async def test_diff_explanation_defaults_open_and_toggles_without_capturing_review_typing(self):
+        value = state()
+        value["steps"][0]["substeps"][0]["diffs"][0]["hunk_explanations"] = ["Explain the model change"]
+        self.workspace.apply_state(value)
+        await self.pilot.press("enter")
+        await self.pilot.pause()
+        panel = self.workspace.query_one("#implementation-explanation-panel")
+        text = self.workspace.query_one("#implementation-explanation", Static)
+        self.assertTrue(panel.display)
+        self.assertEqual(text.render().plain, "Explain the model change")
+        self.assertLessEqual(panel.size.height, 6)
+        self.assertLess(panel.region.y, self.workspace.query_one(HistoricalCode).region.y)
+        hint = self.workspace.query_one("#implementation-explanation-hint", Static)
+        filename = self.workspace.query_one("#implementation-file")
+        header = self.workspace.query_one("#implementation-diff-header")
+        self.assertTrue(hint.display)
+        self.assertEqual(hint.render().plain, "E Toggle explanation")
+        self.assertEqual(hint.region.y, filename.region.y)
+        self.assertEqual(hint.region.right, header.content_region.right)
+        self.assertLessEqual(filename.region.right, hint.region.x)
+        self.assertNotIn("Explanation", self.workspace.query_one("#implementation-hint", Static).render().plain)
+        await self.pilot.press("e")
+        self.assertFalse(panel.display)
+        await self.pilot.press("E")
+        self.assertTrue(panel.display)
+        await self.pilot.press("tab", "e")
+        self.assertTrue(self.workspace.chat_open)
+        self.assertTrue(panel.display)
+        self.assertEqual(self.workspace.query_one(ReviewInput).text, "e")
+        self.assertFalse(hint.display)
+
+    async def test_diff_explanation_tracks_navigation_and_is_hidden_on_summary_and_plan(self):
+        value = state()
+        part = value["steps"][0]["substeps"][0]
+        source = "\n".join(f"line {i}" for i in range(30))
+        part["diffs"] = [{"path": "file.txt", "after": source,
+                          "patch": "@@ -2 +2 @@\n-old\n+line 1\n@@ -20 +20 @@\n-old\n+line 19",
+                          "hunk_explanations": ["First explanation", "Second explanation"]}]
+        self.workspace.apply_state(value)
+        await self.pilot.press("enter")
+        await self.pilot.pause()
+        panel = self.workspace.query_one("#implementation-explanation-panel")
+        text = self.workspace.query_one("#implementation-explanation", Static)
+        self.assertEqual(text.render().plain, "First explanation")
+        await self.pilot.press("right")
+        self.assertEqual(text.render().plain, "Second explanation")
+        part["diffs"][0]["hunk_explanations"][1] = "Complete revised second explanation"
+        self.workspace.apply_state(value)
+        self.assertEqual(text.render().plain, "Complete revised second explanation")
+        self.workspace.selection = (0, -1)
+        self.workspace.show_selection()
+        self.assertFalse(panel.display)
+        self.assertFalse(self.workspace.query_one("#implementation-diff-header").display)
+        self.workspace.inspect_plan(True)
+        self.assertFalse(panel.display)
+        self.assertFalse(self.workspace.query_one("#implementation-diff-header").display)
+
+    async def test_diff_header_keeps_hint_on_the_right_when_filepath_is_long_and_resized(self):
+        value = state()
+        path = "src/" + "long-directory/" * 12 + "implementation.py"
+        value["steps"][0]["substeps"][0]["diffs"][0]["path"] = path
+        self.workspace.apply_state(value)
+        await self.pilot.press("enter")
+        for width in (120, 90):
+            await self.pilot.resize_terminal(width, 35)
+            await self.pilot.pause()
+            filename = self.workspace.query_one("#implementation-file")
+            hint = self.workspace.query_one("#implementation-explanation-hint", Static)
+            header = self.workspace.query_one("#implementation-diff-header")
+            self.assertEqual(header.size.height, 1)
+            self.assertEqual(hint.region.y, filename.region.y)
+            self.assertEqual(hint.region.right, header.content_region.right)
+            self.assertLessEqual(filename.region.right, hint.region.x)
+            self.assertIn("…", filename.render().plain)
+            self.assertTrue(filename.render().plain.endswith("implementation.py"))
+
+    async def test_historical_diffs_without_explanations_have_an_explicit_fallback(self):
+        self.workspace.apply_state(state())
+        await self.pilot.press("enter")
+        self.assertTrue(self.workspace.query_one("#implementation-explanation-panel").display)
+        self.assertEqual(self.workspace.query_one("#implementation-explanation", Static).render().plain,
+                         "No explanation available. This change may come from a terminal command.")

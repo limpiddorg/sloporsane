@@ -135,6 +135,11 @@ std::int64_t ImplementationBoundaries::capture(std::size_t step, std::size_t cou
         interval.edits.erase(interval.edits.begin(), interval.edits.begin() + last.snapshot.edits.size());
     }
     boundary.diffs = TurnFiles(directory).diffs(interval);
+    if (progress.status == "mutation" && !progress.explanation.empty()) for (auto& diff : boundary.diffs) {
+        std::size_t hunkCount = diff.patch.starts_with("@@ -") ? 1 : 0;
+        for (std::size_t at = 0; (at = diff.patch.find("\n@@ -", at)) != std::string::npos; at += 5) ++hunkCount;
+        diff.hunkExplanations.assign(std::max(std::size_t{1}, hunkCount), progress.explanation);
+    }
     if (progress.status == "mutation" && boundary.diffs.empty()) return previous.empty() ? 0 : previous.back().id;
     if (!mutationPaths.empty()) {
         std::vector<std::filesystem::path> ordered;
@@ -150,8 +155,6 @@ std::int64_t ImplementationBoundaries::capture(std::size_t step, std::size_t cou
             return rank(left.path) < rank(right.path);
         });
     }
-    if (!boundary.diffs.empty() && !boundary.owner)
-        throw std::logic_error("Declare the active substep before editing; during validation use correcting with its target substep");
     auto currentProgress = previous;
     if (progressAfter) {
         std::erase_if(currentProgress, [&](const auto& entry) { return entry.id <= progressAfter; });
@@ -164,6 +167,14 @@ std::int64_t ImplementationBoundaries::capture(std::size_t step, std::size_t cou
             throw std::logic_error("Start technical validation for this revised result before submitting it");
     }
     if (progress.status != "mutation") advance(boundary, count, currentProgress);
+    // A failed validation capture can leave real changes without an owner. A
+    // validated, explicit repair target must be able to recover that pending
+    // interval; otherwise every correcting announcement repeats the same refusal.
+    // Never reassign contributions already owned by an active substep.
+    if (!boundary.diffs.empty() && !boundary.owner && progress.status == "correcting")
+        boundary.owner = boundary.activeSubstep;
+    if (!boundary.diffs.empty() && !boundary.owner)
+        throw std::logic_error("Declare the active substep before editing; during validation use correcting with its target substep");
     const auto append = [&](const ImplementationBoundary& entry) {
         SessionDatabase::Statement insert(db, "INSERT INTO implementation_boundaries(step,payload,generation) VALUES(?,?,?) RETURNING id");
         insert.bind(1, static_cast<std::int64_t>(step));

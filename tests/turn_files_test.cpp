@@ -52,7 +52,7 @@ protected:
     }
     ToolContext context(TurnFiles& files) {
         ToolContext ctx{workspace, workspace, [](const auto&) {}};
-        ctx.mutateFiles = [&](const auto& paths, const auto& action) { files.mutate(paths, action); };
+        ctx.mutateFiles = [&](const auto& paths, const auto& action, const auto&) { files.mutate(paths, action); };
         return ctx;
     }
 };
@@ -184,7 +184,7 @@ TEST_F(TurnFilesTest, DeniedBashDoesNotRunTheCheckpointHookAndBashOutsideGitIsNo
     begin(files);
     auto ctx = context(files);
     bool checkpointed = false;
-    ctx.mutateFiles = [&](const auto&, const auto&) { checkpointed = true; };
+    ctx.mutateFiles = [&](const auto&, const auto&, const auto&) { checkpointed = true; };
     ctx.ask = [](const auto&) { throw std::runtime_error("Denied"); };
     EXPECT_THROW(BashTool{}.execute({{"command", "printf denied > denied"}, {"mainCommand", "printf"}}, ctx), std::runtime_error);
     EXPECT_FALSE(checkpointed);

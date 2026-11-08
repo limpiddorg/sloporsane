@@ -8,8 +8,11 @@ void from_json(const nlohmann::json& json, WriteArguments& arguments);
 
 class WriteTool : public Tool {
 public:
+    explicit WriteTool(bool explained = false) : explained(explained) {}
     ToolDefinition getDefinition() const override;
     ToolResult execute(const nlohmann::json& arguments, const ToolContext& context) const override;
+private:
+    bool explained;
 };
 
 #endif // SOS_WRITE_TOOL_HPP

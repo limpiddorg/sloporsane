@@ -1,12 +1,15 @@
 """Immutable historical code, grouped by unified-diff zones (three context lines)."""
 import re
 from dataclasses import dataclass
+from threading import Lock
 from rich.text import Text
 from .stable_scroll import StableScroll
-from .scroll_window import ScrollWindow
+from .historical_document import HistoricalDocument
+from textual import work
+from textual.worker import get_current_worker
 from textual.geometry import Size
 from textual.widgets import Static
-from .config import ALGAE_MD, BOLD_MD, MUTED_COLOR, SLOP_COLOR
+from .config import ALGAE_MD, BOLD_MD, MUTED_COLOR, SLOP_COLOR, MISC_MD
 from .code_colors import highlighted_lines, ADDED_BACKGROUND, REMOVED_BACKGROUND
 
 HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -37,24 +40,29 @@ class ChangeZone:
     label: str
     hunk: int = 0
     order: int | None = None
+    end: int | None = None
+    explanation: str = ""
 
 
 def change_zones(diffs):
     result = []
     for diff in diffs:
         orders = diff.get("hunk_order", [])
+        explanations = diff.get("hunk_explanations", [])
         patch = diff["patch"].splitlines()
         headers = [(i, HEADER.match(line)) for i, line in enumerate(patch) if HEADER.match(line)]
         if not headers or "after" not in diff:
-            result.append(ChangeZone(diff["path"], patch_rows(patch), 0, diff["path"], order=min(orders) if orders else None))
+            result.append(ChangeZone(diff["path"], patch_rows(patch), 0, diff["path"], order=min(orders) if orders else None,
+                                     end=len(patch), explanation="\n".join(explanations)))
             continue
         source = diff["after"].splitlines()
         # Earlier saved reviews have patches but no historical file contents.
         if any(int(match[3]) - (1 if match[4] != "0" else 0) + (int(match[4]) if match[4] is not None else 1) > len(source)
                for _, match in headers):
-            result.append(ChangeZone(diff["path"], patch_rows(patch), 0, diff["path"], order=min(orders) if orders else None))
+            result.append(ChangeZone(diff["path"], patch_rows(patch), 0, diff["path"], order=min(orders) if orders else None,
+                                     end=len(patch), explanation="\n".join(explanations)))
             continue
-        rows, cursor, centers = [], 0, []
+        rows, cursor, centers, ends = [], 0, [], []
         for position, (offset, match) in enumerate(headers):
             start = int(match[3])
             count = int(match[4]) if match[4] is not None else 1
@@ -69,12 +77,14 @@ def change_zones(diffs):
                 elif line.startswith(("+", " ")):
                     rows.append((cursor + 1, line[1:], ALGAE_MD if line.startswith("+") else ""))
                     cursor += 1
+            ends.append(len(rows))
         while cursor < len(source):
             rows.append((cursor + 1, source[cursor], "")); cursor += 1
         for position, center in enumerate(centers):
             match = headers[position][1]
             result.append(ChangeZone(diff["path"], rows, center, f'{diff["path"]}:{match[3]}', position,
-                                     orders[position] if position < len(orders) else None))
+                                      orders[position] if position < len(orders) else None, ends[position],
+                                      explanations[position] if position < len(explanations) else ""))
     return sorted(result, key=lambda zone: (zone.order is None, zone.order or 0))
 
 
@@ -91,8 +101,9 @@ class HistoricalCode(StableScroll):
         self.offsets = []
         self.rendered_width = None
         self.document = None
-        self.wrapped_lines = []
-        self.measured_zone = None
+        self.prepared = None
+        self.documents = []
+        self.syntax_lock = Lock()
 
     def show_zone(self, zone):
         with self.app.batch_update():
@@ -101,6 +112,11 @@ class HistoricalCode(StableScroll):
     def _show_zone(self, zone):
         self.remove_class("description", "centered")
         self.zone = zone
+        self.prepared = next((doc for doc in self.documents if doc.path == zone.path and doc.rows == zone.rows), None)
+        if self.prepared is None:
+            self.prepared = HistoricalDocument(zone.path, zone.rows)
+            self.documents.append(self.prepared)
+            self.documents = self.documents[-4:]
         self.loading = True
         # Fill even a tall pane before the first paint, with enough margin not
         # to trigger successive extensions just because the hunk was opened.
@@ -122,6 +138,27 @@ class HistoricalCode(StableScroll):
             self.loading = False
             self.call_after_refresh(self.on_resize)
         self.call_after_refresh(positioned)
+        if self.prepared.syntax is None and not self.prepared.preparing:
+            self.prepared.preparing = True
+            self.prepare_syntax(self.prepared)
+
+    @work(thread=True, group="historical-syntax")
+    def prepare_syntax(self, document):
+        # Lex the complete immutable source away from the UI thread. Starting
+        # mid-file would lose multiline string/comment state.
+        with self.syntax_lock:
+            if get_current_worker().is_cancelled or document not in self.documents:
+                document.preparing = False
+                return
+            lines = highlighted_lines(document.path, "\n".join(document.source))
+            if not get_current_worker().is_cancelled:
+                self.app.call_from_thread(self.syntax_ready, document, lines)
+
+    def syntax_ready(self, document, lines):
+        document.set_syntax(lines)
+        document.preparing = False
+        if self.zone is not None and self.prepared is document:
+            self.paint_window()
 
     def show_description(self, text, *, centered=False):
         self.zone = None
@@ -138,15 +175,12 @@ class HistoricalCode(StableScroll):
         # The hidden pane has no region yet. Its column already has the final
         # width: don't first wrap the entire file at one character per line.
         width = max(1, self.content_size.width or self.parent.content_size.width)
-        digits = len(str(max((number or 0 for number, _, _ in self.zone.rows), default=0)))
-        gutter = digits + 3
-        if self.measured_zone is not self.zone or self.rendered_width != width:
-            lines = highlighted_lines(self.zone.path, "\n".join(line for _, line, _ in self.zone.rows))
-            self.wrapped_lines = [line.wrap(self.app.console, max(1, width - gutter), overflow="fold") or [Text()]
-                                  for line in lines]
-            self.document = ScrollWindow(len(lines) for lines in self.wrapped_lines)
-            self.measured_zone = self.zone
+        self.code_width, (self.document, self.wrap_cache) = self.prepared.layout(width)
         self.rendered_width = width
+        self.paint_window()
+
+    def paint_window(self):
+        width, digits = self.rendered_width, self.prepared.digits
         text, self.offsets = Text(no_wrap=True), []
         visual = 0
         for index in range(self.start, self.end):
@@ -154,11 +188,14 @@ class HistoricalCode(StableScroll):
             self.offsets.append(visual)
             sign = "+" if style == ALGAE_MD else "-" if style == BOLD_MD else " "
             background = ADDED_BACKGROUND if sign == "+" else REMOVED_BACKGROUND if sign == "-" else None
-            wrapped = self.wrapped_lines[index]
+            wrapped = self.prepared.wrapped(index, self.code_width, self.wrap_cache, self.app.console)
             for continuation, code in enumerate(wrapped or [Text()]):
                 row = Text(style=f"on {background}" if background else "")
-                row.append(f'{str(number) if number is not None and not continuation else "":>{digits}} ', style=MUTED_COLOR)
-                row.append((sign if not continuation else " ") + " ", style=ALGAE_MD if sign == "+" else SLOP_COLOR if sign == "-" else "")
+                current = sign in ("+", "-") and self.zone.center <= index < (
+                    self.zone.end if self.zone.end is not None else self.zone.center + 1)
+                row.append(f'{str(number) if number is not None and not continuation else "":>{digits}} ',
+                           style=f"{MISC_MD} on #3A4655" if current else MUTED_COLOR)
+                row.append((sign if not continuation else " ") + "  ", style=ALGAE_MD if sign == "+" else SLOP_COLOR if sign == "-" else "")
                 row.append_text(code)
                 row.pad_right(max(0, width - row.cell_len))
                 text.append_text(row)
