@@ -1,4 +1,4 @@
-### Sloporsane (SOS)
+# SOS – Sloporsane
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/sos-banner-dark.svg">
@@ -8,6 +8,9 @@
 
 An AI coding harness designed to make AI-generated code easier to understand.
 
+> [!NOTE]
+> SOS is at an early stage of development: all help and ideas are welcome through issues and pull requests!
+
 ```sh
 curl -fsSL https://limpidd.com/install | bash
 ```
@@ -16,12 +19,19 @@ The official SOS website is [limpidd.com](https://www.limpidd.com/).
 
 Available for **macOS 15+ (Apple Silicon)** and **Linux x86_64 (glibc 2.39+)**.
 
+Then run `sos` and use `/connect` to set up your model provider.
+
+## Why SOS
+
+You can vibe code with SOS, but it's built for reading the implementation, not skipping it:
+it's for people who don't want to ship code they don't understand.
+
 ## How it works
 
 SOS has two modes:
 
 - **Slop** gives you the familiar chat-like experience: describe what you want and let the agent work.
-- **Sane** breaks implementation into steps that make sense to a human, with explanations for each diff. You can read, approve, or challenge each step and work through changes before moving on.
+- **Sane** breaks implementation into steps that make sense to a human, with explanations for each diff. You can read, approve, or challenge each step, and discuss or adjust it before moving on to the next.
 
 <table>
   <tr>
@@ -38,9 +48,7 @@ SOS has two modes:
   </tr>
 </table>
 
-## Who is it for
-
-You can use SOS to vibe code, but the idea is to read the implementation, not skip it. It's for people who aren't comfortable shipping code without understanding what it does.
+## Contributing
 
 For building from source or contributing, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
