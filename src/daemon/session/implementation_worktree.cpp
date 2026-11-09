@@ -36,7 +36,7 @@ void ImplementationWorktree::save() {
     write.bind(1, value); write.step();
 }
 
-std::string ImplementationWorktree::git(const fs::path& cwd, const std::vector<std::string>& arguments) const {
+std::string ImplementationWorktree::git(const fs::path& cwd, const std::vector<std::string>& arguments, int allowedExitCode) const {
     std::vector<std::string> args;
     for (auto variable = environ; *variable; ++variable) {
         const std::string entry(*variable);
@@ -55,7 +55,7 @@ std::string ImplementationWorktree::git(const fs::path& cwd, const std::vector<s
     const auto directory = usePrivateRepository ? privateRepository.parent_path() : cwd;
     const auto result = runGitProcess ? runGitProcess(args, directory, options) :
         core::runProcess("/usr/bin/env", args, directory, {}, {}, options);
-    if (result.exitCode != 0 || result.stopped || result.timedOut) {
+    if ((result.exitCode != 0 && result.exitCode != allowedExitCode) || result.stopped || result.timedOut) {
         auto operation = arguments.empty() ? std::string("unknown") : arguments.front();
         if (operation == "worktree" && arguments.size() > 1) operation += " " + arguments[1];
         const auto reason = result.timedOut ? "timed out after 600 seconds" : result.stopped ? "stopped" :
@@ -88,7 +88,7 @@ void ImplementationWorktree::initialize(const fs::path& original, const std::str
         throw std::invalid_argument("Invalid implementation identity");
     const auto found = GitSnapshot::discover(original);
     const auto originalRoot = found.value_or(fs::canonical(original));
-    const auto revision = found ? git(*found, {"rev-parse", "--verify", "HEAD"}) : "";
+    const auto revision = found ? git(*found, {"rev-parse", "--verify", "--quiet", "HEAD^{commit}"}, 1) : "";
     if (found && git(*found, {"rev-parse", "--show-object-format"}) != "sha1")
         throw std::runtime_error("Implementation snapshots currently require a SHA-1 Git repository");
     const auto checkout = fs::weakly_canonical(PathResolution::worktreesDirectory() / id);
@@ -121,6 +121,12 @@ void ImplementationWorktree::populate() {
     fs::create_directories(worktree.parent_path());
     fs::permissions(worktree.parent_path(), fs::perms::owner_all);
     if (!privateRepository.empty()) initializePrivateRepository();
+    if (head.empty()) {
+        // An unborn user branch stays unborn; only the SOS checkout gets a base commit.
+        const auto tree = git(root, {"mktree"});
+        head = git(root, {"commit-tree", tree, "-m", "Empty implementation baseline"});
+        save();
+    }
     if (registered()) git(root, {"worktree", "remove", "--force", worktree.string()});
     // Only our recorded ref is touched, never the user's branch or index.
     git(root, {"update-ref", "-d", "refs/heads/" + branch});

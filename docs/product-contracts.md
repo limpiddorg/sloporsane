@@ -1,282 +1,300 @@
-# Contrats produit
+# Product contracts
 
-Ces exigences complètent [AGENTS.md](../AGENTS.md). Lire les sections concernées avant
-une modification ; les détails de protocole restent dans les documents liés.
-Les interactions TUI décrites ici visent Python/Textual, pas une obligation de parité FTXUI.
+These requirements supplement [AGENTS.md](../AGENTS.md). Read the relevant
+sections before making changes; protocol details remain in the linked documents.
+TUI interactions here target Python/Textual, not mandatory FTXUI parity.
 
-## Discussion et plans
+## Language
 
-- Discussion Sane reste en pleine largeur, sans panneau de plan permanent. Sous le
-  dernier message assistant de chaque tour terminé, un drawer replié conserve le plan
-  existant à cet instant. Ne rien ajouter aux messages intermédiaires ni sans plan.
-- Le titre est `Objective plan`, ou exactement `Objective plan · updated` pour un tour
-  qui publie une version, y compris après reprise/pagination. Titre et flèche sont Sane ;
-  le contenu ouvert a une bande verte et un fond vert discret.
-- Publier seulement des versions complètes, via remplacement ou patch ciblé, en conservant
-  les précédentes. Parcourir l'historique ne change pas le plan courant du modèle.
-- Les boutons centrés `Implementation plan` et `Implement (Auto plan)` partent de la
-  version affichée et restent en bas du plan avant lancement. Auto plan demande d'abord
-  Step by step / Everything, puis ouvre les steps ; son bouton de génération a un spinner.
-  Un plan finalisé démarre la construction sans acceptation supplémentaire du plan.
-  Échec/annulation arrête le spinner et permet de réessayer avec le rythme choisi.
-- Après lancement, remplacer les actions du bas par `Implementation`, aligné à droite
-  sur la ligne du toggle et accessible sans ouvrir le drawer. Un plan déjà accepté ouvre
-  sa branche existante. Masquer actions et accès Implementation dans l'aperçu Discussion.
-- Le plan d'implémentation non accepté reste à droite du chat, avec séparateur Sane,
-  y compris après restauration. Sa version acceptée apparaît dans le chat en Sane avec
-  accès Implementation. `Implement` est centré sous le plan ; le contrôle du chat reste
-  Sane, ou Cancel pendant génération, et ne lance jamais une génération de plan.
-- Un seul onglet Implement regroupe planification et construction. Après acceptation,
-  sélectionner le premier step. L’entrée `Implementation plan`, alignée à gauche avec retrait au-dessus des steps,
-  affiche le plan figé dans les diffs avec Changes vide dès qu'on y revient avec les
-  flèches de navigation, sans Entrée supplémentaire, comme pour les steps.
-  Le premier plan et ses révisions
-  utilisent une ligne pleine largeur, avec le même espacement vertical, surlignée au survol
-  et bleue à la sélection. `Implementation plan` et `Conclusion` partagent ce format
-   de ligne large alignée à gauche, en gras, avec fond des messages (`content-background`).
-   Le fond bleu sélectionné couvre toute la ligne, sans marges grises latérales.
-  Naviguer sur `Conclusion` affiche directement son contenu, sans Entrée.
-  Sélectionner un step revient à son inspection ; la vue du plan n'inclut pas la construction.
-- Drawers, panneaux et boutons de plan ne prennent pas le focus du composer.
-- Pendant génération, Discussion est consultable en lecture seule sans détacher/annuler
-  le travail. Pendant toute la construction, même entre steps, elle reste figée sans
-  indicateur de génération ; son composer demande de terminer l'implémentation.
-  Conserver la page et la position lors des retours.
+- Application text and generated UI content are in English, including objective
+  and implementation plans, step/substep titles and explanations, diff explanations,
+  progress labels, review proposals, summaries, recaps, session titles and conclusions,
+  even when the user's request is in another language.
+- Preserve exact identifiers, paths, commands, quotations and user-provided content
+  where needed. Do not translate stored history or rewrite historical snapshots.
+
+## Discussion and plans
+
+- Sane Discussion stays full-width, without a permanent plan panel. Below the last
+  assistant message of each completed turn, a collapsed drawer retains the plan
+  active at that time. Add nothing to intermediate messages, Slop turns or turns
+  without a plan. Switching modes never hides or changes historical Sane drawers.
+  Slop turns have no drawer; returning to Sane carries the last active plan even
+  without a new publication. Closing an implementation completes its objective: retain
+  historical drawers, but stop carrying it onto new turns or supplying it as the
+  model's current plan. A new publication starts a new objective; this boundary
+  persists after resume.
+- The title is `Objective plan`, or exactly `Objective plan · updated` for a turn
+  publishing a version, including after resume/pagination. Title and arrow use Sane;
+  expanded content has a green stripe and subtle green background.
+- Publish only complete versions, through replacement or targeted patch, retaining
+  previous versions. Browsing history does not change the model's current plan.
+- Centered `Implementation plan` and `Implement (Auto plan)` buttons start from the
+  displayed version and remain at the bottom before launch. Auto plan first asks
+  Step by step / Everything, then opens the steps; its generation button has a
+  spinner. A finalized plan starts construction without additional acceptance.
+  Failure/cancellation stops the spinner and allows retrying with the chosen pace.
+- After launch, replace bottom actions with `Implementation`, right-aligned on the
+  toggle line and accessible without opening the drawer. An already accepted plan
+  opens its existing branch. Hide actions and Implementation access in Discussion preview.
+- The unaccepted implementation plan stays to the right of chat with a Sane divider,
+  including after restoration. Its accepted version appears in Sane chat with
+  Implementation access. `Implement` is centered below the plan; the chat control
+  remains Sane, or Cancel during generation, and never generates a plan.
+- One Implement tab groups planning and construction. After acceptance, select the
+  first step. The left-aligned, indented `Implementation plan` entry above steps
+  shows the frozen plan in the diff area with Changes entirely hidden as soon as
+  navigation arrows return to it, without another Enter, just like steps. The
+  initial plan and revisions use a full-width row with identical vertical spacing,
+  hover highlighting and blue selection. `Implementation plan` and `Conclusion`
+  share this wide, left-aligned, bold row with message background (`content-background`).
+  The selected blue background covers the entire row without gray side margins.
+  Navigating to `Conclusion` shows its content directly, without Enter; hide Changes
+  there too. Selecting a step restores Changes and inspection; plan view excludes construction.
+- Plan drawers, panels and buttons do not take focus from the composer.
+- During generation, Discussion is read-only without detaching/canceling work.
+  Throughout construction, including between steps, it stays frozen without a
+  generation indicator; its composer asks the user to finish implementation.
+  Preserve page and position on returning. Once every step is built and validated,
+  returning to Discussion directly closes implementation and makes the composer
+  editable. Leaving a completed archive also returns to real Discussion, not its
+  locked preview, unless another implementation remains active. Historical
+  implementation access remains on the old message.
 
 ## AI Check
 
-- `/permissions` propose Ask before, AI Check et Danger, indépendamment de Sane/Slop.
-  AI Check affiche `API: …` puis `Model: …` sur deux lignes et le seuil dès sa sélection,
-  sans activation avant Save. Ne pas afficher de paragraphe de migration des seuils.
-  Sans clé configurée ni modèle en brouillon utilisable, masquer les lignes API et Model
-  plutôt que montrer les valeurs par défaut comme une configuration active.
-  Ask before et Danger conservent leur sélection directe.
-- Les pourcentages sont la probabilité estimée de `allow`, pas le champ `confidence`
-  du fournisseur : autoriser à partir du seuil inclus. Conserver les valeurs enregistrées,
-  documenter leur signification et l’absence de garantie de sécurité ou
-  d’équivalence de calibration entre modèles. À 0, aucun appel au vérificateur ; les
-  restrictions Sane/review restent prioritaires.
-- Save applique ensemble le modèle, le seuil et la clé en brouillon, puis ferme après
-  acknowledgement. Une erreur laisse les réglages corrigeables. Fermer sans Save
-  abandonne le brouillon et efface sa clé temporaire.
-- Change model ouvre une popup : choisir OpenAI Decisions ou TypeSafe, puis renseigner
-  endpoint complet, modèle libre et clé masquée. Proposer les endpoints officiels,
-  préserver les paramètres historiques OpenRouter ; aucun appel daemon avant Save
-  dans le parent. Use model ne fait que revenir au parent avec le brouillon.
-- Échap dans les champs revient au choix d’API et efface la clé saisie ; Échap dans
-  ce choix annule la popup. Une clé sauvegardée n’est jamais relue dans le formulaire.
-  Sa réutilisation exige le même protocole et endpoint ; changer seulement le modèle
-  peut la conserver. Les secrets restent dans auth.json protégé, jamais dans le chat.
-- Exiger la capacité `permission_check_version: 1` pour configurer AI Check. Un ancien
-  daemon ne doit pas ignorer silencieusement modèle ou nouvelle sémantique des seuils.
-  Les historiques restent immuables, avec leurs scores enregistrés d’origine.
+- `/permissions` offers Ask before, AI Check and Danger, independently of Sane/Slop.
+  AI Check shows `API: …`, then `Model: …` on two lines and the threshold as soon as
+  selected, without activation before Save. Do not show a threshold migration
+  paragraph. Without a configured key or usable draft model, hide API/Model lines
+  rather than presenting defaults as active configuration. Ask before and Danger
+  retain direct selection.
+- Percentages estimate `allow` probability, not the provider's `confidence` field:
+  authorize at or above the threshold. Retain saved values, document their meaning
+  and the absence of safety guarantees or equivalent calibration across models.
+  At 0, do not call the verifier; Sane/review restrictions retain priority.
+- Save applies draft model, threshold and key together, then closes after
+  acknowledgement. Errors leave settings editable. Closing without Save discards
+  the draft and clears its temporary key.
+- Change model opens a popup: choose OpenAI Decisions or TypeSafe, then enter full
+  endpoint, free-form model and masked key. Offer official endpoints and preserve
+  historical OpenRouter settings; no daemon call before Save in the parent.
+  Use model only returns to the parent with the draft.
+- Escape in fields returns to API selection and clears the entered key; Escape
+  there cancels the popup. A saved key is never read back into the form. Reuse
+  requires the same protocol and endpoint; changing only the model may retain it.
+  Secrets stay in protected auth.json, never chat.
+- Require `permission_check_version: 1` to configure AI Check. An older daemon must
+  not silently ignore the model or new threshold semantics. Histories remain
+  immutable, with their original recorded scores.
 
-## Interactions Textual
+## Textual interactions
 
-- L'outil `wait` attend la fin d'une opération extérieure via une commande de surveillance,
-  avec les mêmes permissions que `bash`. Tests, builds et installations restent dans `bash`,
-  quelle que soit leur durée. Sans commande d'attente native, le modèle fournit un polling
-  borné avec conditions explicites de succès/échec. Les sorties intermédiaires ne relancent
-  pas le modèle ; fin du processus, timeout ou annulation rendent la main. Le timeout par
-  défaut est d'une heure. Arrêter le watcher local n'annule pas l'opération distante.
-- Pendant un appel `wait` actif, Activity garde son spinner et affiche une ligne de statut
-  dessous, après le contenu quand le drawer est ouvert, alignée sur le A d'Activity.
-  Le modèle fournit `status`, une phrase de cinq mots maximum (de préférence quatre ou cinq),
-  souvent `Waiting…`, mais sans préfixe imposé, ni points finaux. `.`, `..`, `...` bouclent
-  dans un espace stable. Un reflet lent nettement blanc traverse uniquement le texte de
-  gauche à droite, sans éclairer les points ni le fond.
-  Arrêter l'animation au résultat ou à l'interruption ; ne pas l'animer dans l'historique terminé.
-- Les titres d'outils ne sont pas en gras. Pour bash, afficher `mainCommand` en gris entre
-  statut et exit code éventuel ; ce libellé descriptif ne change ni exécution ni permissions.
-  Préserver libellés et patterns grep/glob dans les résumés légers, sans lire les anciens bodies.
-- Chemins des titres, lignes read et en-têtes de fichiers : une seule ligne, raccourcie au
-  milieu en gardant début/fin, recalculée au redimensionnement. Résumés gris, contenu DEPTH.
-- Dans Activity, décaler les flèches internes de deux colonnes. Le contenu ouvert commence
-  deux colonnes après la première lettre du titre, y compris Reasoning, outils et Compaction.
-- Modales : Entrée valide, Échap revient/ferme, sans boutons Confirm/Connect/Cancel/Close
-  redondants. Les actions distinctes restent visibles ; gauche/droite choisit l'action,
-  validation/Save sélectionnée par défaut. Préserver gauche/droite pour éditer les champs.
-- Haut/bas pilote la dernière liste visible et active utilisée, même depuis un champ/action ;
-  sans liste, conserver la navigation normale. Dans Implement, haut/bas pilote toujours les
-  steps, même depuis Changes ou la review. Afficher une aide clavier adaptée.
-- Les chats suivent les messages uniquement si l'utilisateur est en bas ; ne pas déplacer
-  une personne remontée dans l'historique.
+- `wait` observes an external operation through a monitoring command, with the same
+  permissions as `bash`. Tests, builds and installations stay in `bash`, regardless
+  of duration. Without a native waiting command, the model supplies bounded polling
+  with explicit success/failure conditions. Intermediate output does not wake the
+  model; process exit, timeout or cancellation returns control. Default timeout:
+  one hour. Stopping the local watcher does not cancel the remote operation.
+- During active `wait`, Activity keeps its spinner and shows a status line beneath,
+  after content when expanded, aligned with Activity's A. The model supplies
+  `status`, at most five words (preferably four or five), often `Waiting…` but
+  without a required prefix or trailing dots. `.`, `..`, `...` cycle in stable
+  space. A slow, clearly white shimmer crosses only the text left to right,
+  without lighting dots or background. Stop animation at result/interruption;
+  never animate completed history.
+- Tool titles are not bold. For bash, show `mainCommand` in gray between status
+  and any exit code; this descriptive label changes neither execution nor
+  permissions. Preserve labels and grep/glob patterns in lightweight summaries,
+  without reading old bodies.
+- Title paths, read rows and file headers use one line, middle-shortened with
+  beginning/end retained and recalculated on resize. Summaries gray, content DEPTH.
+- Indent Activity's inner arrows by two columns. Expanded content begins two
+  columns after the title's first letter, including Reasoning, tools and Compaction.
+- Modals: Enter confirms, Escape returns/closes, without redundant
+  Confirm/Connect/Cancel/Close buttons. Distinct actions remain visible;
+  left/right selects an action, confirmation/Save selected by default. Preserve
+  left/right editing inside fields.
+- Up/down controls the last visible active list used, even from a field/action;
+  without a list, retain normal navigation. In Implement, up/down always controls
+  steps, even from Changes or review. Show appropriate keyboard help.
+- Chats follow messages only when the user is at the bottom; never move someone
+  who has scrolled up in history.
 
-## Version et mises à jour
+## Version and updates
 
-- Afficher seulement `dev` ou `vMAJOR.MINOR.PATCH` en haut à droite, sur la ligne des tabs. La version est
-  embarquée au build via `SOS_VERSION`, `dev` par défaut et tag pour les releases.
-- Un build `dev` ne consulte jamais le backend pour les mises à jour. Une version
-  stable vérifie au lancement, en arrière-plan et sans bloquer, la version publiée
-  servie par le même backend que l'installateur. Échec réseau silencieux.
-- Nouvelle version : popup en anglais, `Not now` sélectionné par défaut, Échap
-  ferme. Avertir que toutes les TUI SOS et le daemon de l'utilisateur seront fermés.
-- Après accord, quitter Textual et passer à un processus Bash indépendant dans le
-  même terminal. Une seule confirmation ; préparer/vérifier les téléchargements
-  avant d'arrêter les autres processus. Le processus d'installation survit à l'arrêt
-  de SOS et du daemon, puis relance uniquement l'instance initiatrice dans son
-  workspace, avec son socket. En cas d'échec, garder le lanceur précédent et
-  afficher l'erreur dans le terminal. Refuser une version différente de celle validée.
+- Show only `dev` or `vMAJOR.MINOR.PATCH` at top right on the tabs line. Version is
+  embedded at build time through `SOS_VERSION`, defaulting to `dev`, or the release tag.
+- A `dev` build never queries the update backend. A stable release checks the
+  published version at startup, in the background without blocking, using the
+  installer's backend. Network failure is silent.
+- New version: English popup, `Not now` selected by default, Escape closes. Warn
+  that all the user's SOS TUIs and daemon will be closed.
+- After agreement, exit Textual and hand over to an independent Bash process in
+  the same terminal. One confirmation only; prepare/verify downloads before
+  stopping other processes. Installation survives SOS/daemon shutdown, then
+  relaunches only the initiating instance in its workspace, with its socket.
+  On failure, retain the previous launcher and show the error in the terminal.
+  Reject any version different from the one confirmed.
 
-## Construction et inspection
+## Construction and inspection
 
-- Un step ne se déplie qu'une fois construit. Cliquer inspecte, sans Cancel ni validation.
-  Entrée sur le step actif déclenche Cancel avec confirmation, ou Continue s'il est interrompu.
-  À la réouverture d'une construction interrompue/en échec, sélectionner le step de travail
-  avec Continue ; ne pas forcer cette sélection en live ni dans les archives.
-- À la réouverture, afficher immédiatement Loading implementation et un spinner dans les
-  diffs jusqu'à réception de l'état ; arrêter l'attente et signaler les erreurs.
-- Conserver sélection et diff pendant les mises à jour live. Le retour sur une substep
-  restaure sa zone de diff (fichier/hunk), mémorisée uniquement dans la TUI par version
-  et substep, jamais dans la session. La navigation garde la ligne sélectionnée visible
-   par le défilement minimal, sans mouvement si la sélection ne change pas.
-  Le menu plan/steps/Conclusion utilise un seul scroll externe, pas de scroll interne des steps.
-- Les diffs historiques restent navigables dans le fichier complet. Le premier affichage
-  n'attend pas sa coloration syntaxique complète ; celle-ci se prépare hors du thread UI
-  avec l'état lexical du document entier. Partager les mesures et lignes repliées entre
-  hunks du même contenu historique et de même largeur, sans déplacer le scroll lors de
-  l'arrivée des couleurs ni lire le checkout courant.
-- Seules les lignes ajoutées/supprimées du hunk courant ont leur gouttière MISC sur le
-  même fond gris que les flèches Version des Steps (`#3A4655`), jamais ses lignes
-  de contexte. Ne pas changer les signes `+`/`-` ni les
-  fonds verts/rouges du code. Deux colonnes d'espace après le signe appartiennent au
-  fond du code, pas à la gouttière ; aligner aussi le contexte et les continuations.
-- Au-dessus de la diff, afficher par défaut son explication dans un petit panneau avec
-  séparateur. `E` le masque/réaffiche seulement quand le chat est fermé ; afficher alors
-  `E Toggle explanation` à droite du filepath, sur la même ligne, pas dans l'aide du bas.
-  Conserver ce choix
-  pendant la navigation ; ne pas afficher le panneau sur les plans et résumés de steps.
-  Les anciennes diffs sans texte indiquent explicitement l'absence d'explication.
-- En exécution Implement, `edit`, `write` et `apply_patch` exigent une explication non vide,
-  capturée avec la mutation, sans nouvel outil ni appel modèle. Le modèle peut réutiliser
-  un texte pertinent pour des éditions similaires. Après review, il réécrit une synthèse
-  de tout l'état actuel de la diff, changements précédents conservés compris. Une correction
-  remplace le texte du hunk concerné ; une fusion conserve les explications des autres hunks
-  en les séparant par un saut de ligne. Préserver ces textes dans les versions historiques.
-- PgUp/PgDown font défiler le panneau de contenu affiché (diff, texte du step, plan,
-  conclusion), indépendamment du focus ; si la review est ouverte via Tab, ils ciblent
-  son chat à la place.
-- Montrer dès le début tous les titres numérotés des substeps prévues ; activité/explication
-  seulement lorsqu'elles existent, ou pour le travail en cours. Les titres/descriptions du
-  contenu gardent leurs couleurs normales, sans marqueurs `[x]`/`[ ]` ni vert de validation.
-- Sous la description du step : compte terminé/total à gauche d'une barre texte `[###---]`,
-  largeur stable et marges, en MISC. Compter les finalisations réelles, pas une promesse du
-  modèle ; les substeps explicitement écartées comptent. La barre reste pleine en réparation.
-- Les timers Activity suivent l'exécution réelle, même hors écran. Afficher la durée
-  active fournie par le daemon et prolongée localement, sans redémarrer à la navigation.
-- Pendant validation technique : `Validating` au-dessus, reflet blanc rapide synchronisé
-  sur mot/barre en aller-retour, arrêté à la fin/interruption. Après les substeps, montrer
-  `Validating the step`, sans numéro, en MISC, avec Activity mais sans description.
-- Réserver tests, builds, linters et inspections de vérification à la validation technique,
-  pas aux substeps de construction ; les lectures nécessaires à l'implémentation restent
-  permises. Les réparations de validation ciblent les substeps d'origine. Capturer l'appartenance pendant les mutations/frontières, sans
-   redistribution globale des hunks finale ni perte des contributions inchangées.
-  Si une capture de validation échoue après avoir laissé des changements sans propriétaire,
-  une déclaration `correcting` valide peut rattacher cet intervalle en attente à sa cible
-  explicite, y compris après reprise. Ne pas réattribuer les contributions déjà capturées ;
-  mutation et clôture sans cible restent refusées tant que cet intervalle n'est pas récupéré.
-- Garder la validation proportionnée aux changements du step et aux exigences explicites
-  du plan. Réutiliser les résultats réussis encore valides ; pas de relecture globale ni
-  de répétition de contrôles sans incertitude ou risque de régression concret. Après une
-  réparation, relancer les contrôles affectés. Le dernier step ne déclenche pas un nouvel
-  audit de toute l'implémentation. Les contrôles requis restent obligatoires.
-- La phase de validation reste une frontière obligatoire, pas une obligation de nouveaux
-  contrôles. Si aucun contrôle supplémentaire n'est nécessaire, l'expliquer et clôturer
-  le step. Le plan précise les vérifications nécessaires ou la raison de leur absence,
-  sans inventer de substep de vérification ni d'audit final systématique.
-- Pendant la construction normale, finaliser ou écarter une substep active automatiquement
-  la première substep restante, ou la validation si toutes sont finalisées. Persister cette
-  transition atomiquement avec la finalisation, sur le même snapshot et sans lui attribuer
-   de mutations. Activer aussi la première substep avant l'exécution, sans appel modèle ;
-   une reprise conserve la frontière existante. Les cibles de réparation/révision restent explicites.
-  Une activation n'atteste pas qu'une édition a commencé et ne vaut pas validation humaine.
-- Dimensionner plans et tests selon la demande et les risques concrets, sans multiplier
-  les steps ou les cas limites hypothétiques du seul fait de Sane. Privilégier les tests
-  existants et contrôles courts ; ne pas créer un framework de simulation pour remplacer
-  un navigateur indisponible sans nécessité explicite. Clôtures et conclusion réutilisent
-  les résultats capturés sans récapitulatif redondant, tout en signalant les limites réelles.
-- Soumettre `complete_implementation_step` avant une fin normale. Une soumission réussie
-  termine le tour sans rappel modèle ni outil suivant. Réutiliser les dernières explications
-  completed/unnecessary sauf révision explicite ; pas d'inspection systématique des diffs
-  pour les constructions à appartenance capturée. Grouper les annonces/outils ordonnés
-   lorsqu'aucune décision ne dépend d'un résultat intermédiaire.
-- Terminer le travail manquant dans le périmètre, réparer et revérifier. Blocage, refus ou
-  annulation reste une interruption explicite, jamais une complétion fictive. Les contrôles
-  requis non exécutés, échecs inexpliqués et régressions bloquent. Un échec démontré sur la
-  baseline, préexistant et sans rapport, peut rester documenté dans step/conclusion sans
-  bloquer la clôture technique, sans le déclarer réussi ni autoriser une réparation annexe.
-- Une substep sans diff finale sort automatiquement des diffs à valider ; conserver son
-  activité/explication. Une substep barrée affiche une raison générique indiquant que les
-  changements précédents la rendent inutile, sans fabriquer du travail.
-- Durée cumulée et débit agrégé : seulement sous les titres du menu, pas dans le contenu.
-  Débit = tokens de sortie / temps des appels modèle ; absent si le provider ne donne pas
-  les tokens. Statistiques muted, ou TITLE jaune sur la sélection bleue.
-- Step actif MISC : ligne sous le titre avec `[terminé/total]`, deux premiers mots du
-  substep courant, `...` et spinner. Steps validés Algae, futurs muted, construits non
-  validés blancs. Vert de validation seulement dans menu/récapitulatif Human validation.
-  Validate et Cancel de construction sont DEPTH ; Cancel du chat est Sane, libellé Sane
-  noir et centré hors génération.
+- A step expands only once built. Clicking inspects, without Cancel or validation.
+  Enter on the active step triggers Cancel with confirmation, or Continue if
+  interrupted. Reopening interrupted/failed construction selects the working step
+  with Continue; do not force selection live or in archives.
+- On reopening, immediately show Loading implementation and a spinner in the diff
+  area until state arrives; stop waiting and report errors.
+- Preserve selection and diff during live updates. Returning to a substep restores
+  its diff position (file/hunk), remembered only in the TUI per version/substep,
+  never in the session. Keep selection visible with minimal scrolling, without
+  movement when selection is unchanged. The plan/steps/Conclusion menu uses one
+  outer scroll, not an inner step scroll.
+- Historical diffs remain navigable in the full file. Initial display does not
+  await full syntax highlighting; prepare it off the UI thread using whole-document
+  lexical state. Share measurements and wrapped lines among hunks of identical
+  historical content and width, without moving scroll when colors arrive or
+  reading the current checkout.
+- Only added/deleted lines in the current hunk have their MISC gutter on the same
+  gray background as step Version arrows (`#3A4655`), never context lines. Do not
+  change `+`/`-` signs or green/red code backgrounds. Two spaces after the sign
+  belong to the code background, not the gutter; align context and continuations too.
+- Above the diff, show its explanation by default in a small panel with a divider.
+  `E` hides/restores it only when chat is closed; show `E Toggle explanation` to the
+  right of the filepath on the same line, not in bottom help. Preserve the choice
+  during navigation; omit the panel on plans and step summaries. Old diffs without
+  text explicitly indicate that no explanation is available.
+- During Implement execution, `edit`, `write` and `apply_patch` require a nonempty
+  explanation captured with the mutation, without another tool or model call.
+  The model may reuse suitable text for similar edits. After review, rewrite a
+  summary of the entire current diff, including retained earlier changes. A
+  correction replaces the affected hunk's text; a merge retains other hunks'
+  explanations separated by a newline. Preserve these texts in historical versions.
+- PgUp/PgDown scroll the displayed content (diff, step text, plan, conclusion),
+  regardless of focus; if review is opened via Tab, target its chat instead.
+- Show all numbered planned substep titles from the start; activity/explanation
+  only when available or for current work. Content titles/descriptions retain
+  normal colors, without `[x]`/`[ ]` markers or validation green.
+- Below the step description: completed/total at the left of a text `[###---]`
+  bar, stable width and margins, in MISC. Count actual finalizations, not model
+  promises; explicitly dismissed substeps count. The bar stays full during repair.
+- Activity timers follow real execution even offscreen. Display daemon active
+  duration, extended locally, without restarting on navigation.
+- During technical validation: `Validating` above, with a fast synchronized white
+  shimmer back and forth across word/bar, stopped on completion/interruption.
+  After substeps, show unnumbered `Validating the step` in MISC, with Activity but
+  no description.
+- Reserve tests, builds, linters and verification inspections for technical
+  validation, not construction substeps; implementation reads remain allowed.
+  Validation repairs target original substeps. Capture ownership at mutations/
+  boundaries without final global hunk redistribution or loss of unchanged
+  contributions. If a validation capture fails leaving unowned changes, a valid
+  `correcting` declaration may attach the pending interval to its explicit target,
+  including after resume. Do not reassign captured contributions; mutation and
+  completion without a target remain refused until that interval is recovered.
+- Keep validation proportionate to step changes and explicit plan requirements.
+  Reuse still-valid successful results; no global rereading or repeated checks
+  without a concrete uncertainty or regression risk. After repair, rerun affected
+  checks. The last step does not trigger another whole-implementation audit.
+  Required checks remain mandatory.
+- Validation remains a required boundary, not a requirement for new checks. If
+  none are needed, explain why and complete the step. The plan specifies necessary
+  checks or why none are needed, without inventing a verification substep or a
+  systematic final audit.
+- During normal construction, completing/dismissing a substep automatically
+  activates the first remaining substep, or validation if all are finalized.
+  Persist this transition atomically with finalization, on the same snapshot,
+  without attributing mutations to it. Also activate the first substep before
+  execution without a model call; resume preserves the existing boundary.
+  Repair/revision targets remain explicit. Activation proves neither that editing
+  has begun nor human validation.
+- Size plans/tests to the request and concrete risks, without multiplying steps
+  or hypothetical edge cases merely because of Sane. Prefer existing tests and
+  short checks; do not create a simulation framework to replace an unavailable
+  browser without explicit need. Completions/conclusion reuse captured results
+  without redundant recap, while reporting actual limitations.
+- Submit `complete_implementation_step` before a normal end. Successful submission
+  ends the turn without a model callback or later tool. Reuse latest
+  completed/unnecessary explanations unless explicitly revising them; no systematic
+  diff inspection for captured-ownership construction. Group ordered
+  announcements/tools when no decision depends on an intermediate result.
+- Finish missing in-scope work, repair and recheck. Blockage, refusal or
+  cancellation remains an explicit interruption, never fictitious completion.
+  Unrun required checks, unexplained failures and regressions block completion.
+  An unrelated failure demonstrated on the preexisting baseline may remain
+  documented in step/conclusion without blocking technical completion; do not
+  claim it passed or use it to authorize unrelated repairs.
+- A substep without a final diff automatically leaves diffs requiring validation;
+  retain its activity/explanation. A struck-through substep shows a generic reason
+  that previous changes make it unnecessary, without fabricating work.
+- Cumulative duration and aggregate throughput appear only below menu titles,
+  not in content. Throughput = output tokens / model-call time; absent if the
+  provider supplies no tokens. Statistics muted, or TITLE yellow on blue selection.
+- Active step in MISC: line below title with `[completed/total]`, the first two
+  current-substep words, `...` and spinner. Validated steps Algae, future steps
+  muted, built/unvalidated steps white. Validation green only in menu/Human
+  validation recap. Construction Validate/Cancel use DEPTH; chat Cancel uses Sane,
+  with black centered Sane label outside generation.
 
-## Arbre Changes
+## Changes tree
 
-- Lire les enfants directs de la racine et des dossiers finaux contenant des changements.
-  Ajouter leurs ancêtres sans charger les voisins intermédiaires ; lire les autres dossiers
-  seulement à leur ouverture explicite. Aucun inventaire récursif daemon/TUI.
-- Toujours lire le snapshot historique, jamais le checkout courant. Compacter les chaînes
-  sans bifurcation en préservant branches/dernier dossier ouvert ; raccourcir les chaînes
-  au milieu si nécessaire, jamais les noms de fichiers.
-- Chaque dossier final affiche cinq éléments au total, avec tous les changements et leurs
-  branches obligatoires, quitte à dépasser cinq. `...` seulement pour des voisins masqués,
-  non cliquable. Changes reste manipulable à la souris sans prendre le focus des steps.
-- Si voisins masqués ou chemin raccourci, `Show all` en dernière ligne accessible au scroll
-  révèle voisins et structure complète. Ouvrir seulement les ancêtres des changements en
-  lisant leurs enfants directs, pas récursivement les autres dossiers. `Compact` restaure
-  la projection compacte. Conserver le choix en live, réinitialiser au changement de step/snapshot.
+- Read direct children of the root and terminal directories containing changes.
+  Add ancestors without loading intermediate neighbors; read other directories
+  only on explicit expansion. No recursive daemon/TUI inventory.
+- Always read the historical snapshot, never the current checkout. Compact
+  nonbranching chains while retaining branches/last open directory; shorten chains
+  in the middle if needed, never filenames.
+- Each terminal directory shows five items total, including every change and its
+  required branches even if this exceeds five. `...` only for hidden neighbors,
+  not clickable. Changes remains mouse-operable without taking step focus.
+- With hidden neighbors or shortened paths, a scroll-accessible final `Show all`
+  reveals neighbors and full structure. Open only change ancestors by reading
+  direct children, not other directories recursively. `Compact` restores the
+  compact projection. Preserve live choice; reset on step/snapshot change.
 
-## Review et corrections
+## Review and corrections
 
-- Review seulement sur le premier step non validé construit et ses substeps, dans les deux
-  rythmes. Ailleurs, Tab ou `/` signale l'indisponibilité sans bloquer l'inspection.
-- Depuis le menu, `/` ouvre/focalise la review et insère `/` sans remplacer le brouillon.
-  Suggestions : skills et `/connect`, `/model`, `/permissions`, `/mcps` seulement ; refuser
-  explicitement les autres commandes natives. Les skills ne changent pas les permissions.
-- Chaque step conserve sa conversation, son contexte de construction arrêté à sa fin,
-  et les résumés précis des reviews précédentes. Chaque question inclut fichier/hunk regardés.
-- Le composer reste éditable pendant réponse ; conserver le prochain brouillon sans lancer
-  un second tour. Strictement vide et focalisé, gauche/droite navigue les diffs sans fermer
-  la review ni déplacer le focus ; avec texte, conserver l'édition normale.
-- Une proposition focalise Accept ; gauche/droite choisit Accept/Decline, même depuis le
-  chat vide, jamais les diffs. Accepter ferme la review et sélectionne immédiatement le step
-  corrigé avec Preparing pendant les opérations asynchrones.
-- Montrer une seule version complète d'implémentation à la fois. Le sélecteur
-  `← Version N →` est au-dessus d'Implementation plan dans le menu gauche,
-  avec libellé centré en gras, fond du composer (`input-background`) sur le bandeau et
-  flèches désactivées aux bornes. Avec plusieurs versions, le libellé est sélectionnable
-  à la souris ou via ↑ depuis le plan ; ←/→ change alors la version sans parcourir les diffs,
-  et ↓ revient au plan. Le panneau principal affiche `Version N` centré en titre gras
-  tant que le libellé est sélectionné. Avec une seule version, cette entrée n'est pas focalisable.
-  Les flèches ont un fond légèrement plus clair que le composer (`#3A4655`) ;
-  `Show all` / `Compact` ont le fond classique des boutons de popup. Tous passent au
-  bleu au survol, sans fond bleu permanent. Il pilote ensemble le plan, les steps, substeps,
-  Activities, explications, validations techniques et diffs issus des snapshots de cette version,
-  y compris les steps retirés depuis. Aucun Previous results, plan numéroté intercalé,
-  ancien step barré ni sélecteur propre à un step. Le contenu est aligné à gauche et en haut,
-  même pour la version initiale seule ; le bouton Implementation plan est aligné à gauche.
-  Après acceptation d'une correction, afficher immédiatement la nouvelle version avec Preparing,
-  puis sa progression normale. Résumé global pour l'initial, demande acceptée pour une correction.
-  Les versions anciennes restent en lecture seule et stables en live ; les parcourir ne relance
-  rien et ne change ni la version à valider ni l'état réel de l'exécution.
-- Seule l'acceptation intègre le segment courant de review à la construction, comme historique
-  sans replay ni permissions. Persister sa frontière ; conserver les échanges visibles mais
-  ne plus les injecter séparément dans la review suivante. Les résumés des steps suivants
-  portent uniquement sur le segment non intégré.
+- Review only on the first built, unvalidated step and its substeps, at either
+  pace. Elsewhere, Tab or `/` reports unavailability without blocking inspection.
+- From the menu, `/` opens/focuses review and inserts `/` without replacing the
+  draft. Suggestions: skills and only `/connect`, `/model`, `/permissions`, `/mcps`;
+  explicitly reject other native commands. Skills do not change permissions.
+- Each step retains its conversation, construction context stopped at its end,
+  and precise prior-review summaries. Each question includes the viewed file/hunk.
+- Composer remains editable during response; retain the next draft without starting
+  another turn. When strictly empty and focused, left/right navigates diffs without
+  closing review or moving focus; with text, preserve normal editing.
+- A proposal focuses Accept; left/right chooses Accept/Decline, even from empty
+  chat, never diffs. Acceptance closes review and immediately selects the corrected
+  step with Preparing during asynchronous operations.
+- Show one complete implementation version at a time. `← Version N →` is above
+  Implementation plan in the left menu, centered bold label, composer background
+  (`input-background`) on the strip and arrows disabled at boundaries. With multiple
+  versions, select the label by mouse or ↑ from the plan; ←/→ then changes version
+  without navigating diffs, and ↓ returns to the plan. The main panel shows centered
+  bold `Version N` while selected. With one version, the entry is not focusable.
+  Arrows have a slightly lighter background than the composer (`#3A4655`);
+  `Show all` / `Compact` use normal popup-button background. All turn blue on hover,
+  without permanent blue background. The selector controls that version's plan,
+  steps, substeps, Activities, explanations, technical validations and snapshot diffs,
+  including subsequently removed steps. No Previous results, interleaved numbered
+  plan, old struck-through step or per-step selector. Content is top/left-aligned,
+  even for the initial version alone; Implementation plan is left-aligned.
+  After correction acceptance, immediately show the new version with Preparing,
+  then normal progress. Global summary for initial work, accepted request for
+  correction. Old versions stay read-only and stable live; browsing restarts
+  nothing and changes neither the version awaiting validation nor real execution.
+- Only acceptance integrates the current review segment into construction, as
+  history without replay or permissions. Persist its boundary; keep exchanges
+  visible but stop injecting them separately into subsequent review. Later-step
+  summaries cover only the unintegrated segment.
 
-## Résumés et compaction
+## Summaries and compaction
 
-- Préparer les résumés de reviews au premier message du step suivant, puis les persister
-  et réutiliser. Même génération, Activity et annulation normales, sans popup, validation
-  ou annonce spéciale. Modèle sélectionné, contexte dédié, échanges originaux avant/après
-  compaction, jamais messages de compaction ni construction.
+- Prepare review summaries at the next step's first message, then persist/reuse
+  them. Normal generation, Activity and cancellation, without popup, validation or
+  special announcement. Selected model, dedicated context, original exchanges
+  before/after compaction, never compaction or construction messages.
 - Bound sources by chunks and recursive merging. Review summaries retain two corrections
   followed by an emergency synthesis. Ordinary compaction requests MAXIMUM 1% of the
   effective input window with a 2,000-token budget floor, less whenever possible,
@@ -289,144 +307,152 @@ Les interactions TUI décrites ici visent Python/Textual, pas une obligation de 
 - Display `Compaction` and its spinner without a counter on the initial call of each
   chunk or merge. Only size corrections show `2 / 3` or `3 / 3`, without a bullet or
   the word `Attempt`. Ordinary chunk/merge calls do not increase the retry counter.
-- Vérifier construction + résumés + question avant injection ; compacter d'abord la
-  construction si nécessaire. La review compacte aussi pendant ses réponses.
-- Chaque vraie compaction : drawer rouge `Compaction`, flèche alignée sur Activity,
-  spinner pendant exécution, sans barre, entre les Activities. Même règle en construction
-  et validation ; une compaction initiale peut précéder la première Activity. À la fin
-  réussie, afficher l'Activity suivante et son spinner sans attendre son premier message.
-- Après compaction, conserver la dernière annonce de phase exacte après le rappel Sane/Slop ;
-  ne jamais réactiver une ancienne autorisation d'exécution pendant une review.
+- Check construction + summaries + question before injection; compact construction
+  first if needed. Review also compacts during responses.
+- Each actual compaction: red `Compaction` drawer, arrow aligned with Activity,
+  spinner during execution, no bar, between Activities. Same rule in construction
+  and validation; initial compaction may precede the first Activity. On success,
+  show the next Activity and spinner without awaiting its first message.
+- After compaction, retain the latest exact phase announcement after the Sane/Slop
+  reminder; never reactivate old execution authorization during review.
 
-## Validation humaine et conclusion
+## Human validation and conclusion
 
-- Human validation ne montre que le récapitulatif des substeps, pas la description globale.
-  Disponible seulement sur le premier step non validé ; Échap ferme sa confirmation.
-- Importer avant de valider globalement le step. Désactiver Validate pendant import et
-  bloquer les doubles envois. Après confirmation, replier le step et sélectionner le résumé
-  du suivant avec titres/substeps et Preparing ; ne pas avancer avant confirmation ou sur conflit.
-- Conclusion figure après le dernier step, consultable dès que tous sont construits.
-  Le dernier `complete_implementation_step` fournit un récapitulatif global un peu plus
-  détaillé que les explications, sans répétition exhaustive, avec contrôles/réserves, conservé
-  dans l'archive. Pas de Close avant dernière validation humaine ni dans les archives.
-- Après dernière validation, ouvrir Conclusion et focaliser immédiatement le bouton Close
-  classique en bas du contenu, même hors écran, sans obligation de scroll automatique.
-  Sélectionné, il est bleu DEPTH ; Entrée revient à Discussion, ferme Implement et fige l'archive.
+- Human validation shows only the substep recap, not the global description.
+  Available only on the first unvalidated step; Escape closes confirmation.
+- Import before globally validating the step. Disable Validate during import and
+  prevent double submission. After confirmation, collapse the step and select the
+  next summary with titles/substeps and Preparing; do not advance before
+  confirmation or on conflict.
+- Conclusion follows the last step and is available once all steps are built.
+  The last `complete_implementation_step` supplies a global recap slightly fuller
+  than explanations, without exhaustive repetition, with checks/caveats, retained
+  in the archive. No Close before final human validation or in archives.
+- After final validation, open Conclusion and immediately focus the standard Close
+  button at the content bottom, even offscreen, without requiring automatic scroll.
+  Selected, it is DEPTH blue; Enter returns to Discussion, closes Implement and
+  freezes the archive.
 
-## Workspaces et isolation
+## Workspaces and isolation
 
-- `worktree` liste/crée/sélectionne dans le dépôt actif ; `workspace` déplace la conversation
-  vers un dossier existant, avec/sans Git, autre dépôt inclus. Création/bascule seulement
-  sur demande directe ou prescription claire d'un skill explicitement invoqué. Un fichier
-  découvert ne suffit pas. Pas de popup supplémentaire ; autorisé en Sane, pas pendant
-  Implement/review. La liste reste disponible. Commit/merge/push restent des actions Bash séparées.
-- Les skills/MCP restent hérités du workspace source ; AGENTS suit le dossier actif. Pas de
-  copie de configuration ou de changements locaux lors d'un déplacement. `/resume` restaure
-  le workspace ; une nouvelle session démarre dans le dossier courant sans création automatique.
-  `/undo` reste lié aux chemins d'origine, Implement importe dans le workspace actif.
-- Créations utilisateur depuis HEAD sous
-  `$XDG_DATA_HOME/sos/workspaces/<repo>-<identifiant>/<nom>/`, branche `sos/<nom>`.
-  Identifiant issu du Git commun canonique, partagé entre worktrees mais distinct entre clones.
-  Ne pas déplacer/renommer les worktrees existants ni les nettoyer automatiquement.
-  Une PR ne déclenche ni bascule ni avertissement particulier.
-- Le sélecteur `/worktree` et sa suppression sont Slop seulement. Liste et `New…` : Entrée
-  sélectionne/crée, Échap revient/ferme. Select par défaut à gauche, Delete à droite.
-  Confirmation de suppression exceptionnelle : branche/emplacement seulement, Cancel
-  sélectionné à gauche, Validate à droite, gauche/droite choisit, Entrée exécute, Échap annule.
-- Interdire la suppression du checkout principal et des destinations utilisées par les
-  intégrations ou sessions attachées/en chargement ; afficher Current / Opened in another
-  session en corail. Revérifier et réserver côté daemon. Ne forcer ni sale/verrouillé,
-  ne supprimer aucune branche. Les sessions fermées ne bloquent pas, mais une destination
-  disparue bloque leur reprise sans repli silencieux.
-- Implement utilise `$XDG_DATA_HOME/sos/worktrees/`, distinct des workspaces utilisateur.
-  La baseline reproduit l'état local uniquement sur la branche SOS, sans stash ni modification
-  de branche/index utilisateur. Commits de stockage sans hooks/signature. Validation humaine :
-  import du seul step dans les fichiers, sans commit utilisateur ; conflit = step bloqué et
-  bandeau Slop existant. Interruption conserve le checkout ; Close retire checkout/branche
-  temporaire mais conserve archives et objets épinglés pour inspection historique.
-- Sans Git ni ancêtre Git, dépôt privé hors workspace, aucun `.git` utilisateur ni remote.
-  Respecter `.gitignore`/exclusions globales, toujours exclure `.sos/` même réinclus.
-  Parcourir les dépôts imbriqués à toute profondeur comme fichiers ordinaires sans leurs `.git`.
-  Copie CoW si disponible (`clonefile` / `FICLONE`), sinon classique, jamais hardlinks vers
-  l'original ; capturer ensuite la baseline. Ce n'est ni une sandbox ni une copie instantanée garantie.
+- `worktree` lists/creates/selects within the active repository; `workspace` moves
+  the conversation to an existing directory, with/without Git, including another
+  repository. Create/switch only on direct request or clear instruction from an
+  explicitly invoked skill. A discovered file is insufficient. No extra popup;
+  allowed in Sane, not during Implement/review. Listing remains available.
+  Commit/merge/push remain separate Bash actions.
+- Skills/MCPs stay inherited from the source workspace; AGENTS follows the active
+  directory. No configuration or local-change copying on move. `/resume` restores
+  workspace; a new session starts in the current directory without automatic
+  creation. `/undo` stays tied to original paths; Implement imports into the active workspace.
+- User-created workspaces start from HEAD under
+  `$XDG_DATA_HOME/sos/workspaces/<repo>-<identifier>/<name>/`, branch `sos/<name>`.
+  Identifier derives from canonical shared Git directory, shared across worktrees
+  but distinct across clones. Do not move/rename existing worktrees or clean them
+  automatically. A PR triggers no special switch or warning.
+- `/worktree` selection and deletion are Slop-only. List and `New…`: Enter
+  selects/creates, Escape returns/closes. Select default on left, Delete on right.
+  Exceptional deletion confirmation: branch/location only, Cancel selected on left,
+  Validate on right; left/right chooses, Enter executes, Escape cancels.
+- Forbid deleting the main checkout and destinations used by integrations or
+  attached/loading sessions; show Current / Opened in another session in coral.
+  Recheck and reserve in the daemon. Do not force dirty/locked removal or delete
+  branches. Closed sessions do not block, but a missing destination blocks resume
+  without silent fallback.
+- Implement uses `$XDG_DATA_HOME/sos/worktrees/`, separate from user workspaces.
+  Baseline reproduces local state only on the SOS branch, without stash or user
+  branch/index changes. Storage commits have no hooks/signing. Human validation
+  imports only the step into files, without a user commit; conflict blocks the
+  step with the existing Slop banner. Interruption retains checkout; Close removes
+  temporary checkout/branch but retains archives and pinned objects for inspection.
+- A Git repository without a first commit starts Implement automatically with an
+  empty SOS-only base commit, then copies the local state into its checkout.
+  The user's branch remains unborn and its index is preserved, including on import.
+- Without Git or a Git ancestor, use a private repository outside the workspace,
+  no user `.git` or remote. Respect `.gitignore`/global excludes; always exclude
+  `.sos/` even if reincluded. Traverse nested repositories at any depth as ordinary
+  files without their `.git`. CoW copy if available (`clonefile` / `FICLONE`), else
+  ordinary copy, never hardlinks to originals; then capture baseline. This is
+  neither a sandbox nor a guaranteed instantaneous copy.
 
 ## Skills
 
-- Découverte : `<workspace>/.sos/skills/` puis `$XDG_CONFIG_HOME/sos/skills/`, workspace
-  prioritaire à nom égal ; jamais `.claude/` ou `.agents/`. Détails : [skills.md](skills.md).
-- Préfixe `/` partagé avec les commandes natives ; noms natifs réservés. Exclure un skill
-  en conflit des suggestions et signaler l'erreur sans bloquer la commande native.
-- Suggestions : skills correspondants triés alphabétiquement d'abord, Algae, commande à gauche,
-  `Skill` gras à droite ; natifs triés ensuite, MISC, titre d'aide sans `/`. Tab sélectionne,
-  Échap masque avant toute fermeture/annulation. Compléter au curseur partout sans changer
-  le texte autour ; une référence dans une phrase n'est pas une invocation structurée.
-- Afficher le `argument-hint` littéral après le nom dans les suggestions, pas dans le titre
-  d'aide ; hint grisé en saisie seulement avant le texte d'arguments de la chaîne initiale.
-  Ne pas retirer ses chevrons/crochets. Jusqu'à six skills consécutifs en tête de message,
-  chacun reçoit le même texte brut final, sans binding/validation TUI.
-- `arguments` : liste de noms ou chaîne séparée par espaces, uniquement des alias positionnels.
-  `argument-descriptions` : mapping optionnel nom → description, liste numérotée dans l'ordre
-  des arguments ; descriptions seules possibles. Aucun required, `{nom}` ni objet nommé.
-  Ignorer les autres champs frontmatter sans diagnostic ni activation de mécanismes.
-- Substitution unique de `$ARGUMENTS`, `$0`, `$1`, `$ARGUMENTS[N]` et alias, guillemets shell
-  sans exécution. Indices absents littéraux, alias absents vides ; sans placeholder recevant
-  le texte, ajouter `ARGUMENTS: ...`.
-- Activity : `skill · nom · statut` en live/reprise, sans ouvrir les arguments pour lire le nom.
+- Discover `<workspace>/.sos/skills/` then `$XDG_CONFIG_HOME/sos/skills/`, workspace
+  winning on name collision; never `.claude/` or `.agents/`. See [skills.md](skills.md).
+- `/` is shared with native commands; native names reserved. Exclude conflicting
+  skills from suggestions and report errors without blocking native commands.
+- Suggestions: alphabetically sorted matching skills first, Algae, command on left,
+  bold `Skill` on right; sorted natives next, MISC, help title without `/`. Tab
+  selects, Escape hides before closing/canceling anything. Complete at cursor
+  anywhere without changing surrounding text; a prose reference is not a
+  structured invocation.
+- Show literal `argument-hint` after names in suggestions, not help title; gray
+  composer hint only before argument text in the initial chain. Do not strip angle
+  or square brackets. Up to six consecutive leading skills each receive the same
+  final raw text, without TUI binding/validation.
+- `arguments`: name list or space-separated string, positional aliases only.
+  `argument-descriptions`: optional name → description mapping, numbered in argument
+  order; descriptions without aliases allowed. No required, `{name}` or named
+  object. Ignore other frontmatter without diagnostics or mechanism activation.
+- Single substitution of `$ARGUMENTS`, `$0`, `$1`, `$ARGUMENTS[N]` and aliases,
+  shell quoting without execution. Missing indices literal, missing aliases empty;
+  without a placeholder receiving text, append `ARGUMENTS: ...`.
+- Activity: `skill · name · status` live/resumed, without opening arguments to read the name.
 
-## MCP et providers
+## MCP and providers
 
-- Codex conserve les messages `system`/`developer` dans l'ordre de l'input : ne pas
-  extraire les annonces tardives vers le champ initial `instructions`. Ce champ requis
-  reste constant ; l'ajout d'un message ne réécrit pas le préfixe déjà envoyé. Cela ne
-  supprime pas les frontières explicites de compaction ni ne garantit un cache hit.
-  En Sane comme en Slop, envoyer les messages `system` sous forme EasyInputMessage
-  sans `type`, acceptée par Codex ; cette adaptation porte uniquement sur la copie
-  réseau, sans changer ordre, rôle, contenu ni historique stocké. L'API OpenAI
-  classique conserve son format existant.
-- Client MCP daemon : stdio et Streamable HTTP, pas HTTP+SSE historique. Config JSON
-  `mcpServers` dans `<workspace>/.sos/mcps.json` ou `$XDG_CONFIG_HOME/sos/mcps.json`,
-  entrée workspace remplaçant entièrement le global homonyme. `url` ou `command` chaîne
-  avec `args` tableau / `env` public ; pas de version requise. Refuser les anciens formats
-  sans réécriture. Activation par défaut, approbation séparée obligatoire pour chaque nouvelle config.
-- `/mcps` gère seulement Connect/Disconnect et Enable/Disable ; ajout/édition/suppression
-  par fichier, pas `/add`, Refresh, Credentials ou Approve séparé. Liste compacte
-  Server / Scope / Connected / Enabled, actions sur une ligne, sans Close. Premier serveur
-  et Connect/Disconnect sélectionnés ; aide haut/bas serveur, gauche/droite action, Entrée,
-  Échap. Guide de configuration succinct dans le contexte du modèle, sans secrets.
-- Connect enchaîne approbation, authentification automatique nécessaire et connexion.
-  Approbation/token : popups séparées, champ token masqué. OAuth seulement sur ce parcours
-  explicite : popup au-dessus de la liste, lien réel et Open in Browser dès découverte
-  de l'URL, jamais inventée ; Échap annule et revient à la liste. Ne pas agrandir la liste.
-- Connected et Enabled indépendants : désactiver cache/refuse les nouveaux appels sans
-  fermer la connexion ni annuler l'appel actif ; connexion explicite possible désactivé.
-  Seul `readOnlyHint: true` rend un outil admissible en Sane, sous les autres permissions ;
-  absent/faux = potentiellement mutateur. Ce n'est pas une garantie de sécurité.
-- Choix persistés immédiatement par nom, globalement dans
-  `$XDG_CONFIG_HOME/sos/mcp-preferences.json`, jamais par session/workspace. Restaurer les
-  connexions souhaitées même désactivées avec config/credentials/approbation du workspace.
-  Pas de serveur inventé si son nom est absent, pas d'OAuth automatique.
-- Restauration en arrière-plan, sans attendre le handshake dans `integration.configure`.
-  Connecting dans la liste ; les outils d'un tour attendent la restauration dans son Activity.
-  Échec dans liste + bandeau, sans changer le choix ni retry automatique dans ce daemon.
-  Disconnect persiste. Sans préférence, respecter fichier et connexion au premier besoin
-  des serveurs activés/approuvés. Préférence globale prime sur enabled sans modifier le fichier.
-- Pas de resources/prompts ni gestion avancée OAuth/secrets en TUI ; options avancées par
-  fichier. Pas de lecture autonome des resources par le modèle ni injection à réception
-  de notifications. Secrets séparés selon [AGENTS.md](../AGENTS.md) et [mcp.md](mcp.md).
-- Une authentification/méthode par provider ; reconnecter remplace seulement son entrée.
-  `/connect` choisit et mémorise le premier modèle compatible du dernier provider connecté.
-  OpenRouter : `sort=newest` ; OpenAI API : created décroissant, absents en fin ; Codex :
-  priority croissant, absents/invalides en fin ; égalités stables. Sélecteur Textual sur
-  premier résultat à l'ouverture et à chaque recherche, sans tirage aléatoire.
-- Modèle/réflexion/maximum de contexte : triplet par conversation, persisté ; dernier choix
-  explicite aussi défaut des nouvelles conversations dans `config.json`. `/resume` restaure
-  sans modifier défaut/autres sessions ni métadonnées historiques. Maximum choisi au moins
-  32 768 tokens, au plus le maximum connu du provider.
+- Codex retains `system`/`developer` messages in input order: do not extract late
+  announcements into initial `instructions`. That required field stays constant;
+  appending a message does not rewrite a sent prefix. This neither removes explicit
+  compaction boundaries nor guarantees cache hits. In both modes, send `system`
+  messages as EasyInputMessage without `type`, accepted by Codex; adaptation affects
+  only the network copy, not order, role, content or stored history. Ordinary
+  OpenAI API retains its existing format.
+- Daemon MCP client: stdio and Streamable HTTP, not legacy HTTP+SSE. JSON
+  `mcpServers` in `<workspace>/.sos/mcps.json` or `$XDG_CONFIG_HOME/sos/mcps.json`;
+  workspace entry fully overrides a global namesake. `url` or string `command`
+  with array `args` / public `env`; no required version. Reject older formats
+  without rewriting. Enabled by default, separate approval required per new config.
+- `/mcps` manages only Connect/Disconnect and Enable/Disable; add/edit/delete through
+  files, no `/add`, Refresh, Credentials or separate Approve. Compact list:
+  Server / Scope / Connected / Enabled, actions on one line, no Close. First server
+  and Connect/Disconnect selected; help for up/down server, left/right action,
+  Enter, Escape. Brief configuration guidance in model context, without secrets.
+- Connect chains approval, necessary automatic authentication and connection.
+  Approval/token use separate popups, token field masked. OAuth only in this
+  explicit flow: popup above list, real link and Open in Browser as soon as URL
+  discovery succeeds, never invented; Escape cancels and returns to list.
+  Do not enlarge the list.
+- Connected and Enabled are independent: disabling hides/refuses new calls without
+  closing connection or canceling active calls; explicit connection allowed while
+  disabled. Only `readOnlyHint: true` makes a tool eligible in Sane, under remaining
+  permissions; absent/false means potentially mutating, not a security guarantee.
+- Choices persist immediately by name, globally in
+  `$XDG_CONFIG_HOME/sos/mcp-preferences.json`, never per session/workspace. Restore
+  desired connections even while disabled with workspace config/credentials/approval.
+  No invented server for an absent name, no automatic OAuth.
+- Restore in background without waiting for handshake in `integration.configure`.
+  Connecting in list; a turn's tools await restoration in Activity. Failure in
+  list + banner without changing preference or automatic retry in this daemon.
+  Disconnect persists. Without preference, honor file and connect enabled/approved
+  servers on first need. Global preference overrides enabled without editing file.
+- No resources/prompts or advanced OAuth/secret management in TUI; advanced options
+  through files. No autonomous model resource reads or notification-triggered
+  injection. Secrets separate per [AGENTS.md](../AGENTS.md) and [mcp.md](mcp.md).
+- One authentication/method per provider; reconnect replaces only its entry.
+  `/connect` selects/remembers the first compatible model of the last successfully
+  connected provider. OpenRouter: `sort=newest`; OpenAI API: created descending,
+  missing last; Codex: priority ascending, missing/invalid last; stable ties.
+  Textual selects the first result on opening and each search, never randomly.
+- Model/reasoning/context maximum form a persisted per-conversation triple; last
+  explicit choice also defaults new conversations in `config.json`. `/resume`
+  restores without changing defaults/other sessions/historical metadata. Chosen
+  maximum is at least 32,768 tokens and at most the provider's known maximum.
 
-## Références d'expérience
+## Experience references
 
-Des approches voisines existent : [AI Code Walkthrough](https://github.com/mmuminovic/AI-Code-Walkthrough),
+Related approaches include [AI Code Walkthrough](https://github.com/mmuminovic/AI-Code-Walkthrough),
 [Kiro](https://kiro.dev/docs/specs/), [Superpowers](https://github.com/obra/superpowers)
-et [Cline](https://docs.cline.bot/features/checkpoints). Elles ne prouvent ni l'unicité
-ni l'adoption future de Sane ; un retour spontané sur une tâche réelle est un signal
-plus fort qu'un intérêt déclaré.
+and [Cline](https://docs.cline.bot/features/checkpoints). They prove neither Sane's
+uniqueness nor future adoption; spontaneous feedback from a real task is stronger
+evidence than stated interest.

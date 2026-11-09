@@ -230,13 +230,24 @@ std::vector<Session::ObjectivePlanTurn> Session::objectivePlanTurns() const {
     std::vector<ObjectivePlanTurn> turns;
     ObjectivePlanTurn current;
     bool inTurn = false;
+    bool sane = true;
+    const auto finishTurn = [&] {
+        if (inTurn && sane && !current.messageId.empty() && !current.objectiveId.empty()) turns.push_back(current);
+    };
     for (const auto& message : journal->summaries()) {
+        if (message.objectiveCompleted) {
+            finishTurn();
+            current = {};
+            inTurn = false;
+            continue;
+        }
         if (message.recap || message.compaction) continue;
         if (message.role == MessageRole::USER) {
-            if (inTurn && !current.messageId.empty() && !current.objectiveId.empty()) turns.push_back(current);
+            finishTurn();
             current.messageId.clear();
             current.updated = false;
             inTurn = true;
+            sane = !message.userMetadata || message.userMetadata->mode != "slop";
         } else if (message.objectivePlan) {
             current.objectiveId = message.id;
             current.updated = true;
@@ -246,7 +257,7 @@ std::vector<Session::ObjectivePlanTurn> Session::objectivePlanTurns() const {
             if (const auto* text = std::get_if<TextContent>(&part); text && !text->text.empty())
                 current.messageId = message.id;
     }
-    if (!executing && inTurn && !current.messageId.empty() && !current.objectiveId.empty()) turns.push_back(current);
+    if (!executing) finishTurn();
     return turns;
 }
 void Session::linkImplementation(const std::string& id) {
@@ -265,9 +276,25 @@ void Session::freezeImplementation() {
 }
 void Session::returnToDiscussion() {
     if (executing || !state.info.discussionId.empty()) throw std::logic_error("Not an idle Discussion");
+    if (state.info.activeImplementationId.empty()) return;
     const auto previous = state.info.activeImplementationId;
-    state.info.activeImplementationId.clear();
-    try { save(); } catch (...) { state.info.activeImplementationId = previous; throw; }
+    Message completed{"objective_completed_" + previous, MessageRole::SYSTEM, {TextContent{
+        "The implementation has been closed and Discussion has resumed. Its objective is done and no longer active. "
+        "Keep the previous plan as history only. Discuss the user's next request without carrying that objective forward; "
+        "publish a new Objective Plan only when a new concrete objective is ready."}}};
+    completed.objectiveCompleted = true;
+    auto info = state.info;
+    info.activeImplementationId.clear();
+    info.updatedAt = now();
+    journal->save({completed}, info);
+    state.info = std::move(info);
+    publishInfo();
+    if (agentReady()) {
+        state.discussionAgent->setEventHandler({});
+        try { state.discussionAgent->append(completed); }
+        catch (...) { state.discussionAgent.reset(); throw; }
+        state.discussionAgent->setEventHandler(eventHandler);
+    }
 }
 bool Session::agentReady() const { return bool(state.discussionAgent); }
 SessionHistoryService& Session::history() { return displayHistory; }
@@ -643,7 +670,7 @@ void Session::sendMessage(const std::string& text, ExecutionMode mode, std::chro
     if (implementationRequest) message.providerText =
         "Implementation plan request. Continue from the accepted Objective Plan and all preceding exchanges. "
         "Inspect the existing code when useful and choose technical details autonomously. Do not edit files or execute the plan. "
-        "Propose a complete implementation plan using submit_implementation_plan with ordered steps and substeps. "
+        "Propose a complete implementation plan in English using submit_implementation_plan with ordered steps and substeps, even when the user writes in another language. "
         "Each step must deliver a coherent outcome exercisable at its own level, with explicit validation. "
         "Keep the plan proportional to the request: use the fewest coherent steps/substeps that preserve understandable outcomes. "
         "Cover requested behavior and concrete regression risks, not an exhaustive matrix of hypothetical edge cases. Do not add features or broaden the test scope merely because construction is in Sane. "
@@ -660,7 +687,7 @@ void Session::sendMessage(const std::string& text, ExecutionMode mode, std::chro
         "Do not implement or edit files. If there is no identifiable target, explain that clearly and do not call submit_objective_plan. "
         "Use ask_choice only when it is impossible to plan without choosing between substantially different product directions. "
         "Choose packages, frameworks, libraries and other technical details autonomously; never ask the user to pick a package. "
-        "Prepare a detailed, high-level Objective Plan: explain what to build, important behaviors, boundaries and how to verify the result. "
+        "Prepare a detailed, high-level Objective Plan in English, even when the user writes in another language: explain what to build, important behaviors, boundaries and how to verify the result. "
         "Call submit_objective_plan with separate plan and stack fields. The plan field must not contain a Stack section or its package list. "
         "The optional stack field is a short Markdown bullet list of key packages or stack choices and their roles "
         "(for example, a windowing or ML framework), not an exhaustive dependency list. "
@@ -669,14 +696,14 @@ void Session::sendMessage(const std::string& text, ExecutionMode mode, std::chro
     if (implementationPlanning && !implementationRequest) {
         message.providerText = text +
             "\n\nThis conversation maintains the Implementation Plan alongside chat. When a complete plan or revision is ready, "
-            "publish it with submit_implementation_plan in this turn. Do not write the plan only in chat or ask the user "
+            "publish it in English with submit_implementation_plan in this turn, even when the user writes in another language. Do not write the plan only in chat or ask the user "
             "to restart planning. Discuss unresolved decisions first; publication does not authorize execution. "
             "The UI renders the submitted plan; keep the chat response concise and do not repeat it.";
     }
     if (objectivePlanning) {
         message.providerText = message.providerText.value_or(text) +
             "\n\nSane discussion maintains a live Objective Plan alongside chat. Update it only when useful and fully ready to use, "
-            "with submit_objective_plan (full replacement) or patch_objective_plan (exact targeted replacements). "
+            "with submit_objective_plan (full replacement) or patch_objective_plan (exact targeted replacements). Write all plan and stack content in English, even when the user writes in another language. "
             "Do not publish partial drafts or manufacture a plan for a simple question. Discuss missing decisions first. "
             "Once you have a complete, concrete objective proposal with no important unresolved product decision, call the plan tool in this same turn. "
             "A chat-only feature list does not update the plan panel. Do not wait for a ritual confirmation before publishing a usable proposal; publication neither accepts it nor starts implementation. "

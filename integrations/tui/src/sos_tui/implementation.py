@@ -159,6 +159,12 @@ class ImplementationConversations:
                 await self.sync()
                 return
             workspace = self.app.query_one(ImplementationWorkspace)
+            archive = self.app.runtime_info.get("implementation_archive", False)
+            if (not self.app.busy and not workspace.review_running
+                    and ((archive and not self.app.runtime_info.get("active_implementation_id"))
+                         or (not archive and workspace.finished_review()))):
+                await self.request("implementation.view" if archive else "implementation.close")
+                return
             if (self.app.runtime_info.get("active_implementation_id") or self.app.busy or workspace.review_running or self.discussion_preview
                     or self.app.runtime_info.get("implementation_execution")):
                 self.discussion_preview = True

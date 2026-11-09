@@ -28,7 +28,7 @@ Message generateConversationRecap(const Conversation& source, Provider& provider
     Conversation request(provider.getFormat());
     request.append(Message{"recap_system", MessageRole::SYSTEM, {TextContent{
         "Write a quick orientation for a HUMAN returning to this conversation, not a technical handoff for another AI. "
-        "Use the user's language and natural, direct wording. Return one compact paragraph of at most 2 short sentences "
+        "Write in English, even when the user writes in another language, with natural, direct wording. Return one compact paragraph of at most 2 short sentences "
         "and 45 words total. Say concretely what we are working on or just changed and what it lets the user do. "
         "Then mention what the user can try now, the next intended step, or a decision awaiting them, only if supported. "
         "Prioritize the main task and its purpose, not a checklist of implementation details. "

@@ -836,6 +836,7 @@ class ImplementationWorkspace(Vertical):
         self.update_review_button()
         self.zones = []
         self.diff_index = 0
+        self.query_one(ImplementationChangesTree).display = False
         self.query_one(ImplementationChangesTree).show_files([], [], [], str, 0)
         self.query_one("#implementation-show-plan", Button).set_class(False, "selected")
         for selector in ("#implementation-diff", "#implementation-step-view", "#implementation-validate",
@@ -856,6 +857,7 @@ class ImplementationWorkspace(Vertical):
 
     def show_accepted_plan(self):
         self.zones = []
+        self.query_one(ImplementationChangesTree).display = False
         self.query_one(ImplementationChangesTree).show_files([], [], [], str, 0)
         self.query_one("#implementation-show-plan", Button).set_class(self.plan_visible, "selected")
         for selector in ("#implementation-diff", "#implementation-step-view", "#implementation-validate",
@@ -874,6 +876,7 @@ class ImplementationWorkspace(Vertical):
         self.query_one("#implementation-hint", Static).update("↑/↓ Steps · Select a step to return")
 
     def show_change_tree(self):
+        self.query_one(ImplementationChangesTree).display = True
         built = self.state["steps"][self.selection[0]] if self.state and self.selection else {}
         baseline = built
         if self.state and not built.get("repository_tree"):

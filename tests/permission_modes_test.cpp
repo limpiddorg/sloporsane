@@ -241,6 +241,17 @@ TEST(ImplementationPhasePromptTest, ExecutionAndReviewAnnounceDifferentAuthority
     EXPECT_NE(review.find("Do not modify files"), std::string::npos);
 }
 
+TEST(ImplementationPhasePromptTest, GeneratedUiContentUsesEnglishRegardlessOfUserLanguage) {
+    const std::string discussion = prompts::DISCUSSION_SYSTEM_PROMPT;
+    EXPECT_NE(discussion.find("Write generated UI content in English"), std::string::npos);
+    EXPECT_NE(discussion.find("Conversational chat may use the user's language"), std::string::npos);
+    EXPECT_NE(discussion.find("do not translate stored history"), std::string::npos);
+    for (const auto phase : {ImplementationPhase::PLANNING, ImplementationPhase::EXECUTION, ImplementationPhase::REVIEW}) {
+        const auto announcement = prompts::implementationPhaseAnnouncement(phase);
+        EXPECT_NE(announcement.find("in English, even when the user writes in another language"), std::string::npos);
+    }
+}
+
 TEST_F(PermissionModesTest, LoadingSkillNeverRunsItsScriptAndBashStillEnforcesSane) {
     const auto location = directory / ".sos/skills/check-api";
     fs::create_directories(location / "scripts");

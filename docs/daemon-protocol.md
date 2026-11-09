@@ -1323,7 +1323,7 @@ using the ordinary bounded transfer. Textual then removes its single `Implement`
 tab; the frozen branch remains available in the implementation history. That tab
 first shows plan discussion, then construction. Its `Implementation plan` action
 above the steps shows the accepted plan in the diff area without leaving the steps
-menu. Changes is empty in this view; selecting a step returns to its inspection.
+menu. Changes is hidden in this view and on Conclusion; selecting a step restores it.
 During plan discussion, the current plan is only in the right-hand panel, including
 after history restoration. `Implement` below that panel accepts it; the chat control
 remains `Sane` or `Cancel`. Only accepted plan versions appear in chat history,
@@ -1333,6 +1333,10 @@ construction (including pauses between steps), Textual keeps Discussion read-onl
 without generation indicators. A non-editable composer asks the user to finish
 the current implementation. Returning to Discussion preserves its loaded page
 and scroll position; it does not detach or cancel construction.
+After all steps are built and validated, selecting Discussion sends
+`implementation.close` directly and restores its editable composer. Returning from
+a frozen archive uses `implementation.view` without a branch ID instead of the
+locked preview, unless another implementation is still active.
 
 Runtime `info` includes `discussion_id`, `implementation_view`,
 `implementation_archive`, `implementation_plan_ready`, `active_implementation_id`, and `implementation_branches`
@@ -1373,7 +1377,12 @@ In Discussion, runtime `info.objective_plans` lists persisted Objective Plan
 messages in version order, including `id`, text `content` and optional
 `objective_stack`. Implementation views expose the parent Discussion's versions
 for read-only previews. `objective_plan_ready`
-means at least one version exists, independently of subsequent ordinary chat.
+means a version exists after the last objective-completion boundary, independently
+of subsequent ordinary chat. Closing an implementation atomically clears its
+active branch ID and journals a system message with `objective_completed: true`.
+Its text tells the model that the old objective is done. The marker is retained
+in lightweight summaries and stops objective readiness and turn inheritance,
+without deleting prior versions, drawers or implementation links.
 All Sane Discussion turns expose `submit_objective_plan` for a full replacement
 and `patch_objective_plan` for exact, unique replacements in `plan` or `stack`.
 Patch arguments are `updates: [{field, old_str, new_str}]`; replacements are
@@ -1383,7 +1392,7 @@ not deferred until successful completion of the model turn. Previous versions
 remain immutable and survive resume. These tools do not edit workspace files.
 
 Textual shows Discussion chat at full width. Runtime `info.objective_plan_turns`
-contains `{message_id, objective_id, updated}` for each completed turn that has
+contains `{message_id, objective_id, updated}` for each completed Sane turn that has
 an Objective Plan, anchored to its last assistant text message. It is derived from
 lightweight journal summaries, including after resume, without loading tool bodies.
 The active turn is omitted until execution ends. A collapsed `Objective plan`
@@ -1395,6 +1404,12 @@ The drawer displays that turn's immutable final version and stack. Its centered
 `objective_id`, or open its existing branch. Actions are hidden in read-only
 Discussion previews. Opening a drawer or clicking its controls does not take
 composer focus; browsing never changes the model's current plan.
+Switching to Slop keeps historical Sane drawers visible and preserves their
+expansion state. Slop turns never inherit a drawer. Returning to Sane carries the
+last active plan onto new turns, even without an update. Once its implementation
+is closed, that objective remains historical only; later turns have no drawer
+until a new objective is published. Earlier drawers and their Implementation
+links remain available.
 The Discussion mode control remains `Sane` while idle and `Cancel` while busy;
 it no longer triggers Objective Plan generation.
 

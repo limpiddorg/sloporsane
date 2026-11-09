@@ -1078,7 +1078,8 @@ TEST_F(SessionTest, OrdinaryPlanningExchangePublishesStructuredImplementationPla
     ASSERT_TRUE(branch->implementationPlanReady());
     ASSERT_TRUE(branch->getMessages().back().implementationPlan);
     EXPECT_EQ(json(*branch->getMessages().back().implementationPlan), implementationPlan());
-    EXPECT_NE(provider->inputs.front().dump().find("publish it with submit_implementation_plan"), std::string::npos);
+    EXPECT_NE(provider->inputs.front().dump().find("publish it in English with submit_implementation_plan"), std::string::npos);
+    EXPECT_NE(provider->inputs.front().dump().find("even when the user writes in another language"), std::string::npos);
     const auto id = branch->getInfo().id;
     branch.reset();
     branch = registry.load(id);
@@ -2944,7 +2945,11 @@ TEST_F(SessionTest, ImplementationBranchesPersistIndependentContextAndResumeTarg
     EXPECT_EQ(reopened.resumeTarget(*discussion), discussionId);
     EXPECT_THROW(branch->sendMessage("Another message", ExecutionMode::SANE), std::logic_error);
     EXPECT_THROW(navigate(*branch, false), std::logic_error);
-    EXPECT_EQ(json(discussion->getMessages()).dump(), parentHistory);
+    auto resumedHistory = discussion->getMessages();
+    ASSERT_TRUE(resumedHistory.back().objectiveCompleted);
+    resumedHistory.pop_back();
+    EXPECT_EQ(json(resumedHistory).dump(), parentHistory);
+    EXPECT_FALSE(discussion->objectivePlanReady());
     turn(*discussion, "Back in Discussion", events);
     EXPECT_EQ(provider->inputs.back().dump().find("PRIVATE IMPLEMENTATION DETAIL"), std::string::npos);
     EXPECT_NE(provider->inputs.back().dump().find("Build a status page."), std::string::npos);
@@ -3087,6 +3092,68 @@ TEST_F(SessionTest, ObjectiveDrawerMetadataArrivesOnCompletedTurnsOnly) {
         }
         co_await client.send({{"type", "integration.close"}});
     });
+}
+
+TEST_F(SessionTest, CompletedObjectiveStaysHistoricalAcrossResumeAndNewDiscussion) {
+    SessionRegistry registry(directory / "sessions", factory());
+    auto session = registry.create(info());
+    const auto id = session->getInfo().id;
+    Message user{"u1", MessageRole::USER, {TextContent{"Discuss"}}};
+    user.userMetadata = UserMessageMetadata{"sane"};
+    Message plan{"p1", MessageRole::ASSISTANT, {TextContent{"First objective"}}};
+    plan.objectivePlan = true;
+    session->record({AgentEventType::HARNESS_MESSAGE_ARRIVED, {user, plan}, {}, {}});
+    auto branch = registry.createImplementation(*session);
+    registry.freezeImplementation(*session, *branch);
+    EXPECT_FALSE(session->objectivePlanReady());
+    EXPECT_FALSE(session->latestObjectivePlan());
+    ASSERT_EQ(session->objectivePlanTurns().size(), 1);
+    EXPECT_EQ(session->objectivePlanTurns()[0].messageId, plan.id);
+    session.reset();
+    session = registry.load(id);
+    EXPECT_FALSE(session->objectivePlanReady());
+    user.id = "u2";
+    Message answer{"a2", MessageRole::ASSISTANT, {TextContent{"An ordinary answer"}}};
+    session->record({AgentEventType::HARNESS_MESSAGE_ARRIVED, {user, answer}, {}, {}});
+    ASSERT_EQ(session->objectivePlanTurns().size(), 1);
+    EXPECT_EQ(session->objectivePlanTurns()[0].objectiveId, "p1");
+    EXPECT_THROW(registry.createImplementation(*session), std::logic_error);
+    user.id = "u3";
+    plan.id = "p2";
+    session->record({AgentEventType::HARNESS_MESSAGE_ARRIVED, {user, plan}, {}, {}});
+    EXPECT_TRUE(session->objectivePlanReady());
+    ASSERT_EQ(session->objectivePlanTurns().size(), 2);
+    EXPECT_EQ(session->objectivePlanTurns().back().objectiveId, "p2");
+    EXPECT_TRUE(session->objectivePlanTurns().back().updated);
+    EXPECT_EQ(session->objectivePlans().size(), 2);
+    auto second = registry.createImplementation(*session);
+    registry.freezeImplementation(*session, *second);
+    EXPECT_FALSE(session->objectivePlanReady());
+    ASSERT_EQ(session->objectivePlanTurns().size(), 2);
+}
+
+TEST_F(SessionTest, SlopTurnsDoNotRepeatAnObjectiveAndReturningToSaneKeepsIt) {
+    SessionRegistry registry(directory / "sessions", factory());
+    auto session = registry.create(info());
+    Message user{"u1", MessageRole::USER, {TextContent{"Discuss"}}};
+    user.userMetadata = UserMessageMetadata{"sane"};
+    Message plan{"p1", MessageRole::ASSISTANT, {TextContent{"Current objective"}}};
+    plan.objectivePlan = true;
+    session->record({AgentEventType::HARNESS_MESSAGE_ARRIVED, {user, plan}, {}, {}});
+    user.id = "u2";
+    user.userMetadata->mode = "slop";
+    Message answer{"a2", MessageRole::ASSISTANT, {TextContent{"Slop answer"}}};
+    session->record({AgentEventType::HARNESS_MESSAGE_ARRIVED, {user, answer}, {}, {}});
+    ASSERT_EQ(session->objectivePlanTurns().size(), 1);
+    EXPECT_TRUE(session->objectivePlanReady());
+    user.id = "u3";
+    user.userMetadata->mode = "sane";
+    answer.id = "a3";
+    session->record({AgentEventType::HARNESS_MESSAGE_ARRIVED, {user, answer}, {}, {}});
+    ASSERT_EQ(session->objectivePlanTurns().size(), 2);
+    EXPECT_EQ(session->objectivePlanTurns().back().messageId, "a3");
+    EXPECT_EQ(session->objectivePlanTurns().back().objectiveId, "p1");
+    EXPECT_FALSE(session->objectivePlanTurns().back().updated);
 }
 
 TEST_F(SessionTest, ObjectiveDrawersKeepTurnSnapshotsAfterPaginationAndResume) {
@@ -4307,7 +4374,7 @@ TEST_F(SessionTest, HistoricalReviewIgnoresCompactionAndConstructionAfterItsBoun
 TEST_F(SessionTest, RecapGenerationIsIsolatedToolFreeAndUsesSelectedModelAndReasoning) {
     Conversation source(ProviderFormat::OPENAI_RESPONSES);
     source.append(Message{"sys", MessageRole::SYSTEM, {TextContent{"PRIVATE HARNESS INSTRUCTIONS"}}});
-    source.append(Message{"user", MessageRole::USER, {TextContent{"Fix the issue"}}});
+    source.append(Message{"user", MessageRole::USER, {TextContent{"Corrige le problème"}}});
     source.append(Message{"tool", MessageRole::TOOL, {ToolResultContent{"call", "RAW TOOL CONTENT", false}}});
     source.append(Message{"assistant", MessageRole::ASSISTANT, {TextContent{"Fixed, tests pending."}}});
     provider->responseText = "The issue is fixed.\nRun the tests next.";
@@ -4326,6 +4393,8 @@ TEST_F(SessionTest, RecapGenerationIsIsolatedToolFreeAndUsesSelectedModelAndReas
     const auto prompt = provider->inputs[0][0].at("content").get<std::string>();
     EXPECT_NE(prompt.find("HUMAN"), std::string::npos);
     EXPECT_NE(prompt.find("45 words"), std::string::npos);
+    EXPECT_NE(prompt.find("Write in English, even when the user writes in another language"), std::string::npos);
+    EXPECT_NE(provider->inputs[0].dump().find("Corrige le problème"), std::string::npos);
     EXPECT_NE(prompt.find("Omit test results"), std::string::npos);
     EXPECT_TRUE(json(recap).get<Message>().recap);
     const auto original = source.getProviderFormat();
@@ -5482,14 +5551,16 @@ TEST_F(SessionTest, IntegrationCreatesLazilyDrainsEventsAndCanReattach) {
 
 TEST_F(SessionTest, GeneratesIsolatedShortTitleAndRejectsEmptyResponses) {
     TestProvider titleProvider(provider);
-    provider->responseText = " \"Créer\n une interface de discussion très agréable et rapide\" \n";
+    provider->responseText = " \"Create\n a pleasant and fast discussion interface\" \n";
     EXPECT_EQ(generateSessionTitle(titleProvider, "title-model", "Améliore cette interface"),
-        "Créer une interface de discussion très");
+        "Create a pleasant and fast discussion");
     EXPECT_EQ(provider->model, "title-model");
     EXPECT_EQ(provider->toolCount, 0);
     ASSERT_EQ(provider->inputs.size(), 1);
     ASSERT_EQ(provider->inputs[0].size(), 2);
     EXPECT_EQ(provider->inputs[0][1]["content"], "Améliore cette interface");
+    EXPECT_NE(provider->inputs[0][0].at("content").get<std::string>().find(
+        "Write in English, even when the user writes in another language"), std::string::npos);
     provider->responseText = "Discussion";
     EXPECT_EQ(generateSessionTitle(titleProvider, "title-model", "Hello"), "Discussion");
     provider->responseText = " \n\t";
