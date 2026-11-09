@@ -135,6 +135,9 @@ class ChatScrollTest(unittest.IsolatedAsyncioTestCase):
         old_answer = list(self.app.query(ResponseMarkdown))[-1]
         self.assertLessEqual(old_answer.region.bottom, self.viewport.content_region.y)
         self.viewport.action_scroll_up()
+        # Capture the reading position after the user's scroll has finished,
+        # not an intermediate animation frame that acceptance may outlive.
+        await asyncio.wait_for(self.pilot.wait_for_scheduled_animations(), timeout=2)
         await self.pilot.pause()
         self.assertLess(self.viewport.scroll_y, self.viewport.max_scroll_y)
         y = user.region.y
