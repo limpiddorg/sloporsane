@@ -1,474 +1,447 @@
-# Coût d'exécution Sane et Slop
+# Sane and Slop execution costs
 
-## Snake : tous les correctifs
+## Snake: all fixes
 
-Essai réel `snake-all-fixes-sane-1`, même prompt, `gpt-6.1-sol`, medium,
-contexte 272 000 et Auto/Jev 60. Daemon de mesure recompilé avec le provider
-corrigé, pas de pilotage de la TUI ni d'attente humaine. Un essai terminé,
-aucun résultat écarté. Les autres colonnes reprennent les essais conservés.
+Real run `snake-all-fixes-sane-1`, same prompt, `gpt-6.1-sol`, medium,
+272,000-token context and Auto/Jev 60. The measurement daemon was rebuilt with
+the corrected provider; no TUI automation or human waiting. One completed run,
+none discarded. Other columns reproduce the retained earlier runs.
 
-| Section (temps provider) | Slop référence | Sane validation ciblée | Sane transitions auto | Sane tous correctifs |
+| Section (provider time) | Slop baseline | Sane focused validation | Sane automatic transitions | Sane all fixes |
 | --- | ---: | ---: | ---: | ---: |
-| Objective Plan | — | 24,1 s | 22,7 s | 19,7 s |
-| Implementation Plan | — | 31,1 s | 31,5 s | 22,3 s |
-| Lectures de construction | 2,7 s | 13,0 s | 15,6 s | 6,5 s |
-| Écriture/édition | 110,0 s | 139,8 s | 150,6 s | 142,9 s |
-| Annonces de progression | — | 63,7 s | 32,0 s | 12,8 s |
-| Contrôles et vérifications | 2,7 s | 66,7 s | 39,9 s | 11,8 s |
-| Clôtures de steps | — | 22,6 s | 18,8 s | 13,9 s |
-| Réponse finale séparée | 5,1 s | Incluse | Incluse | Incluse |
-| Total provider | 120,4 s | 361,2 s | 310,9 s | 229,8 s |
-| Hors provider, toutes phases | 9,0 s | 26,9 s | 20,9 s | 18,6 s |
-| Total mural | 129,4 s | 388,1 s | 331,9 s | 248,4 s |
-| Construction seule, murale | 129,4 s | 328,6 s | 273,6 s | 202,5 s |
-| Appels modèle, toutes phases | 10 | 42 | 32 | 22 |
-| Appels modèle, construction | 10 | 37 | 27 | 17 |
-| Cache global (tokens cachés / entrée) | 91,49 % | 88,73 % | 88,23 % | 90,05 % |
+| Objective Plan | N/A | 24.1 s | 22.7 s | 19.7 s |
+| Implementation Plan | N/A | 31.1 s | 31.5 s | 22.3 s |
+| Construction reads | 2.7 s | 13.0 s | 15.6 s | 6.5 s |
+| Writing/editing | 110.0 s | 139.8 s | 150.6 s | 142.9 s |
+| Progress reports | N/A | 63.7 s | 32.0 s | 12.8 s |
+| Checks and verification | 2.7 s | 66.7 s | 39.9 s | 11.8 s |
+| Step completions | N/A | 22.6 s | 18.8 s | 13.9 s |
+| Separate final response | 5.1 s | Included | Included | Included |
+| Total provider | 120.4 s | 361.2 s | 310.9 s | 229.8 s |
+| Outside provider, all phases | 9.0 s | 26.9 s | 20.9 s | 18.6 s |
+| Total wall time | 129.4 s | 388.1 s | 331.9 s | 248.4 s |
+| Construction only, wall time | 129.4 s | 328.6 s | 273.6 s | 202.5 s |
+| Model calls, all phases | 10 | 42 | 32 | 22 |
+| Model calls, construction | 10 | 37 | 27 | 17 |
+| Overall cache (cached / input tokens) | 91.49% | 88.73% | 88.23% | 90.05% |
 
-Résultat actuel : 285 568 tokens cachés / 317 120 tokens d'entrée, 9 237 de
-sortie. Construction seule : 267 904 / 286 234, soit 93,60 % de cache. Les
-premiers appels des trois agents successifs (Discussion/planification/exécution)
-sont à zéro ; les suivants réutilisent le cache. Transport confirmé : trois
-connexions successives, 22 requêtes, 19 continuations ; le même agent de
-construction garde sa connexion et ses 16 continuations sur 17 requêtes,
-y compris la transition entre steps.
+Current result: 285,568 cached / 317,120 input tokens, 9,237 output tokens.
+Construction only: 267,904 / 286,234, or 93.60% cached. The first calls of the
+three successive agents (Discussion/planning/execution) have zero cache hits;
+later calls reuse the cache. Confirmed transport: three successive connections,
+22 requests, 19 continuations; the same construction agent keeps its connection
+and 16 continuations across 17 requests, including the step transition.
 
-Le plan contient deux steps et quatre substeps, contre trois steps et six
-substeps précédemment. Quatre comptes rendus completed, aucun started/validating
-séparé. La validation finale groupe bash/read/grep dans une réponse, sans
-simulation DOM/timers ad hoc ni répétition des tests moteur inchangés.
+The plan has two steps and four substeps, versus three steps and six substeps
+previously. Four completed reports, no separate started/validating reports.
+Final validation groups bash/read/grep in one response, without ad hoc DOM/timer
+simulation or repetition of unchanged engine tests.
 
-Gain mural observé : 83,4 s (25,1 %) sur le Sane précédent, 139,7 s (36,0 %)
-sur celui d'avant les transitions automatiques. Construction seule : 71,1 s
-(26,0 %) et 126,1 s (38,4 %) respectivement. Le ratio de construction sur le
-Slop conservé passe à 1,56 ; celui du total avec plans à 1,92. Les gains
-cumulent taille du plan, automatisation, consignes et format Codex ; une seule
-génération par état ne démontre pas leur causalité séparée ni la reproductibilité.
-Le taux de cache global ne progresse que modestement : ne pas attribuer la baisse
-du temps au seul cache.
+Observed wall-time reduction: 83.4 s (25.1%) against the previous Sane run,
+139.7 s (36.0%) against the run before automatic transitions. Construction only:
+71.1 s (26.0%) and 126.1 s (38.4%), respectively. The construction ratio against
+the retained Slop run falls to 1.56; the total including plans to 1.92. The gains
+combine plan size, automation, instructions and Codex format; one generation per
+state proves neither individual causality nor reproducibility. Overall cache rate
+improves only modestly: do not attribute the time reduction to caching alone.
 
-Hors chrono : les 14 tests générés passent et la syntaxe des trois modules est
-valide. Aucun fichier du jeu modifié, pas de navigateur réel ni de nouvelle
-batterie d'acceptation indépendante. Artefacts sous
-`build-ai/benchmarks/snake-modes/snake-all-fixes-sane-1/` : result, modèles,
-événements et checkout d'exécution dans `data/sos/worktrees/`.
+Outside timing: all 14 generated tests pass, and all three modules have valid
+syntax. No game files modified; no real browser or new independent acceptance
+suite. Artifacts under
+`build-ai/benchmarks/snake-modes/snake-all-fixes-sane-1/`: result, models, events
+and execution checkout in `data/sos/worktrees/`.
 
-## Format Codex corrigé et vérifié dans les deux modes
+## Codex format corrected and checked in both modes
 
-Le diagnostic réel du 400 est `System messages are not allowed` lorsque
-`role: system` est envoyé avec `type: message`. La même entrée sans `type`
-(EasyInputMessage) est acceptée, avec contenu chaîne ou tableau `input_text`.
-Une consigne système tardive dans cette forme est effectivement suivie.
-Ce comportement a été testé sur l'endpoint Codex OAuth, pas déduit du seul
-schéma de l'API Responses publique.
+The actual 400 diagnostic is `System messages are not allowed` when
+`role: system` is sent with `type: message`. The same item without `type`
+(EasyInputMessage) is accepted with either string content or an `input_text`
+array. A late system instruction in that form is followed. This was tested on
+the Codex OAuth endpoint, not inferred solely from the public Responses API schema.
 
-Le provider commun à Sane/Slop garde donc `instructions` constant à
-`Follow the conversation instructions.` et retire uniquement `type` des messages
-`system` de la copie réseau Codex. Ordre, rôle et contenu sont conservés ;
-l'historique d'origine et le format OpenAI API classique restent inchangés.
+The shared Sane/Slop provider therefore keeps `instructions` constant at
+`Follow the conversation instructions.` and removes only `type` from `system`
+messages in the Codex network copy. Order, role and content are preserved;
+the original history and ordinary OpenAI API format are unchanged.
 
-Contrôle direct HTTP avec identité stable et historique synthétique croissant :
-6 appels, tokens cachés successifs 0, 0, 6400, 6528, 6528, 6528 ; les appels 3
-et 5 ajoutent une consigne système tardive sans modifier le préfixe. Taux de cache
-96,59 % et 97,13 % sur ces deux appels, sans garantie de hit ni gain de latence.
-Artefact : `build-ai/benchmarks/snake-modes/codex-history-cache-1.jsonl`.
+Direct HTTP check with stable identity and growing synthetic history: six calls,
+successive cached-token counts 0, 0, 6400, 6528, 6528, 6528. Calls 3 and 5 add a
+late system instruction without changing the prefix. Cache rates are 96.59% and
+97.13% on those calls, without a guaranteed hit or latency improvement.
+Artifact: `build-ai/benchmarks/snake-modes/codex-history-cache-1.jsonl`.
 
-Après correction du provider, contrôle réel via Integration/Agent : création du
-titre/session puis trois tours Slop → Sane → Slop réussis, sans outils, avec les
-trois réponses attendues. Artefact : `codex-fixed-format-modes-1/` dans le même
-dossier. 44 tests locaux provider, titres, transformer et WebSocket réussis ;
-build `sosd` réussi. Pas de nouveau benchmark Snake pour cette seule correction.
+After the provider fix, a real Integration/Agent check successfully creates a
+title/session then runs Slop → Sane → Slop turns, without tools, producing the
+three expected answers. Artifact: `codex-fixed-format-modes-1/` in the same folder.
+All 44 local provider, title, transformer and WebSocket tests pass; `sosd` builds.
+No new Snake benchmark was run for this fix alone.
 
-## Optimisations suivantes : sans nouvelle mesure de temps
+## Further optimizations: no new timing measurement
 
-Le démarrage initial du premier substep est aussi activé par le harness avant
-la première génération. Une reprise réutilise la frontière existante ; les
-révisions conservent leurs cibles explicites. Les consignes de planification
-limitent le périmètre des tests aux comportements demandés et risques concrets.
-Validation et clôture privilégient contrôles courts, résultats réutilisés et
-explications sans récapitulatif redondant, sans supprimer les exigences explicites.
+The harness also activates the first substep before the first generation.
+Resume reuses the existing boundary; revisions retain explicit targets. Planning
+instructions limit tests to requested behavior and concrete risks. Validation and
+completion favor short checks, reused results and explanations without redundant
+recaps, without removing explicit requirements.
 
-`prepareCodexInstructions` est supprimé. Le champ Codex requis `instructions`
-reste constant ; les éléments `system`/`developer` restent dans `input`, à leur
-position d'origine. Les annonces tardives n'altèrent plus le préfixe de la
-requête précédente. Les historiques stockés ne sont pas réécrits et les
-frontières de compaction restent explicites.
+`prepareCodexInstructions` is removed. The required Codex `instructions` field
+remains constant; `system`/`developer` items remain in `input` at their original
+positions. Late announcements no longer alter the previous request's prefix.
+Stored histories are not rewritten and compaction boundaries remain explicit.
 
-Validation locale : 189 tests runtime et 54 tests provider/Implement réussis,
-build `sosd` réussi. Tests de stabilité du préfixe HTTP et de continuation WS
-après ajout d'annonces, activation initiale sans appel modèle, reprise et flow
-Implement sur le protocole. Aucun gain de temps ou de cache mesuré à ce stade.
-Le contrôle réel `cache-preserved-instructions-1` est bloqué par HTTP 400 avant
-création de session et avant tout appel modèle instrumenté (pas de `models.jsonl`).
-Il ne valide donc pas l'acceptation du nouveau format par le serveur réel.
+Local validation: 189 runtime tests and 54 provider/Implement tests pass, and
+`sosd` builds. Tests cover HTTP prefix stability and WS continuation after
+announcements, initial activation without a model call, resume and the Implement
+protocol flow. No time or cache improvement measured at this stage. The real
+`cache-preserved-instructions-1` check is blocked by HTTP 400 before session
+creation and before any instrumented model call (no `models.jsonl`). It therefore
+does not validate acceptance of the format by the real server.
 
-## Snake : transitions automatiques
+## Snake: automatic transitions
 
-Après finalisation/abandon d'une substep en construction normale, le harness
-persiste atomiquement l'activation de la première restante, ou la validation.
-Le démarrage initial par step et les réparations/révisions restent explicites.
-Les frontières utilisent le même snapshot et n'ajoutent ni diff ni succès fictif.
+After normal-construction substep completion or dismissal, the harness atomically
+persists activation of the first remaining substep, or validation. Initial startup
+per step and repairs/revisions remain explicit. Boundaries use the same snapshot
+and add neither a diff nor fictitious success.
 
-Nouvel essai Sane réel, même prompt et paramètres que la paire précédente.
-Les deux premières colonnes sont les essais précédents conservés, pas de nouvelles
-exécutions. Temps par section = temps provider, pas durée des outils.
+New real Sane run, same prompt and settings as the previous pair. The first two
+columns are retained earlier runs, not new executions. Section times are provider
+time, not tool duration.
 
-| Section | Slop précédent | Sane précédent | Sane transitions auto |
+| Section | Previous Slop | Previous Sane | Sane automatic transitions |
 | --- | ---: | ---: | ---: |
-| Objective Plan | — | 24,1 s | 22,7 s |
-| Implementation Plan | — | 31,1 s | 31,5 s |
-| Lectures de construction | 2,7 s | 13,0 s | 15,6 s |
-| Écriture/édition | 110,0 s | 139,8 s | 150,6 s |
-| Annonces de progression | — | 63,7 s | 32,0 s |
-| Contrôles et vérifications | 2,7 s | 66,7 s | 39,9 s |
-| Clôtures de steps | — | 22,6 s | 18,8 s |
-| Réponse finale séparée | 5,1 s | Incluse | Incluse |
-| Total provider | 120,4 s | 361,2 s | 310,9 s |
-| Hors provider | 9,0 s | 26,9 s | 20,9 s |
-| Temps mural | 129,4 s | 388,1 s | 331,9 s |
-| Appels modèle | 10 | 42 | 32 |
+| Objective Plan | N/A | 24.1 s | 22.7 s |
+| Implementation Plan | N/A | 31.1 s | 31.5 s |
+| Construction reads | 2.7 s | 13.0 s | 15.6 s |
+| Writing/editing | 110.0 s | 139.8 s | 150.6 s |
+| Progress reports | N/A | 63.7 s | 32.0 s |
+| Checks and verification | 2.7 s | 66.7 s | 39.9 s |
+| Step completions | N/A | 22.6 s | 18.8 s |
+| Separate final response | 5.1 s | Included | Included |
+| Total provider | 120.4 s | 361.2 s | 310.9 s |
+| Outside provider | 9.0 s | 26.9 s | 20.9 s |
+| Wall time | 129.4 s | 388.1 s | 331.9 s |
+| Model calls | 10 | 42 | 32 |
 
-Gain observé Sane : 56,2 s (14,5 %), ratio sur le Slop précédent 2,56 contre
-3,00. Neuf annonces au lieu de 17 : trois démarrages initiaux et six résultats,
-aucun started/validating séparé pour les transitions automatiques. Le plan
-comporte six substeps au lieu de sept et réutilise explicitement les résultats
-de tests/syntaxe après la documentation. Les nouvelles consignes conditionnelles
-de validation sont également présentes : ce n'est pas une mesure isolée des
-transitions, ni un gain reproductible établi sur une seule génération.
+Observed Sane improvement: 56.2 s (14.5%), ratio against previous Slop 2.56 versus
+3.00. Nine reports instead of 17: three initial starts and six results, no
+separate started/validating reports for automatic transitions. The plan has six
+substeps rather than seven and explicitly reuses test/syntax results after
+documentation. Conditional validation instructions are also present: this is not
+an isolated transition measurement, nor an established reproducible gain from one
+generation.
 
-Un premier essai conservé (`snake-auto-sane-1`, 370,40 s, deux steps) a utilisé
-la sélection locale entre-temps passée à `gpt-6-astra`, contexte automatique.
-Il ne figure pas dans la comparaison homogène. Le second essai
-`snake-auto-sane-sol-1` fixe les paramètres publics depuis le résultat précédent
-avec `SOS_BENCH_REFERENCE` sans modifier la configuration utilisateur.
+An earlier retained run (`snake-auto-sane-1`, 370.40 s, two steps) used the local
+selection, which had meanwhile changed to `gpt-6-astra`, with automatic context.
+It is excluded from the like-for-like comparison. The second run,
+`snake-auto-sane-sol-1`, fixes public settings from the previous result using
+`SOS_BENCH_REFERENCE` without modifying user configuration.
 
-Vérification hors chrono de l'essai comparable : 15 tests générés réussis et
-syntaxe des trois modules valide. Aucun livrable modifié par le vérificateur,
-pas de navigateur réel. Les tests Implement couvrent aussi activation/reprise,
-appartenance des diffs, réparation ciblée et abandon d'une substep sans clôture
-automatique du step. La validation humaine reste distincte.
+Untimed verification of the comparable run: 15 generated tests pass and all three
+modules have valid syntax. No deliverables changed by the verifier; no real
+browser. Implement tests also cover activation/resume, diff ownership, targeted
+repair and substep dismissal without automatic step completion. Human validation
+remains separate.
 
-## Snake : consignes de validation ciblée
+## Snake: focused validation instructions
 
-Nouvelle paire, même prompt/configuration et même harness recompilé, Slop puis
-Sane, après ajout des consignes de validation proportionnée et de réutilisation
-des résultats encore valides. Aucun essai terminé exclu.
+New pair, same prompt/configuration and same rebuilt harness, Slop then Sane,
+after adding proportionate validation and reuse of still-valid results.
+No completed run excluded.
 
-| Mesure | Slop | Sane |
+| Measurement | Slop | Sane |
 | --- | ---: | ---: |
-| Temps mural | 129,41 s | 388,10 s |
-| Appels modèle | 10 | 42 |
-| Temps provider | 120,43 s | 361,18 s |
-| Construction hors planification | 129,41 s | 328,62 s |
-| Tokens d'entrée | 69 256 | 819 534 |
-| Tokens de sortie | 5 247 | 13 331 |
-| Tokens cachés | 63 360 | 727 168 |
+| Wall time | 129.41 s | 388.10 s |
+| Model calls | 10 | 42 |
+| Provider time | 120.43 s | 361.18 s |
+| Construction excluding planning | 129.41 s | 328.62 s |
+| Input tokens | 69,256 | 819,534 |
+| Output tokens | 5,247 | 13,331 |
+| Cached tokens | 63,360 | 727,168 |
 
-Sane est 3,00 fois plus lent que Slop et prend 38,47 s de plus que la paire WS
-précédente (+11,0 %). Deux appels modèle de moins ne compensent pas le contenu
-supplémentaire généré : 17 rapports de progression et trois clôtures restent.
-Les contrôles prennent 66,72 s provider, contre 44,95 s précédemment, lectures
-de validation comprises. Le plan généré exige explicitement une nouvelle passe
-de tests/syntaxe et une inspection finale des six fichiers/diffs. Il maintient
-donc des répétitions malgré les consignes d'exécution ciblée ; le modèle réutilise
-en revanche les résultats du stub DOM au dernier step. Le contrôle de wiring
-du deuxième step génère un script Node conséquent, puis le dernier step génère
-encore un script de vérification de périmètre et de comparaison avec HEAD.
-Pas de gain établi sur cette paire non déterministe, ni de causalité démontrée.
+Sane is 3.00 times slower than Slop and takes 38.47 s more than the preceding WS
+pair (+11.0%). Two fewer model calls do not offset the extra generated content:
+17 progress reports and three completions remain. Checks take 66.72 s of provider
+time versus 44.95 s previously, including validation reads. The generated plan
+explicitly requires another test/syntax pass and a final inspection of all six
+files/diffs. It therefore retains repetition despite focused execution
+instructions; the model does reuse DOM-stub results at the last step. The second
+step's wiring check generates a substantial Node script, and the last step
+creates another scope-check/HEAD-comparison script. This nondeterministic pair
+establishes neither a gain nor causality.
 
-Vérification hors chrono : 9 tests générés Slop et 16 Sane passent, ainsi que
-les contrôles de syntaxe de leurs trois modules. Aucun fichier généré modifié,
-pas de vérification navigateur réelle ni de nouvelle batterie indépendante.
-Artefacts : `build-ai/benchmarks/snake-modes/snake-focused-{slop,sane}-1/`.
+Untimed verification: nine generated Slop tests and 16 Sane tests pass, as do
+syntax checks for their three modules. No generated files changed, no real
+browser check or new independent suite. Artifacts:
+`build-ai/benchmarks/snake-modes/snake-focused-{slop,sane}-1/`.
 
-## Snake : reprise avec identité et WebSocket
+## Snake: rerun with identity and WebSocket
 
-Le même benchmark Snake a été relancé après les correctifs d'identité et de
-transport, sur les sources courantes recompilées sous `build-ai/`. Ce n'est pas
-un pilotage de la TUI installée : même daemon de mesure, vraies classes runtime,
-pas d'attente humaine, même prompt et même configuration OpenAI `gpt-6.1-sol`,
-`medium`, contexte 272 000, Auto/Jev au seuil 60 %. Ordre : Slop puis Sane.
-Le traitement des instructions système n'a pas été corrigé.
+The same Snake benchmark was rerun after identity and transport fixes, with
+current sources rebuilt under `build-ai/`. It does not drive the installed TUI:
+same measurement daemon, real runtime classes, no human waiting, same prompt and
+OpenAI `gpt-6.1-sol`, `medium`, 272,000-token context, Auto/Jev at 60%. Order:
+Slop then Sane. System-instruction handling was not corrected.
 
-| Mesure | Slop précédent | Slop identité + WS | Sane précédent | Sane identité + WS |
+| Measurement | Previous Slop | Slop identity + WS | Previous Sane | Sane identity + WS |
 | --- | ---: | ---: | ---: | ---: |
-| Temps mural | 119,51 s | 122,69 s | 357,44 s | 349,63 s |
-| Appels modèle | 9 | 9 | 43 | 44 |
-| Temps cumulé provider | 110,89 s | 113,51 s | 327,87 s | 323,14 s |
-| Tokens d'entrée | 58 767 | 59 109 | 838 417 | 871 239 |
-| Tokens de sortie | 4 885 | 4 906 | 12 234 | 11 590 |
-| Tokens cachés | 3 968 | 47 872 | 53 120 | 768 768 |
-| Taux de cache | 6,75 % | 80,99 % | 6,34 % | 88,24 % |
+| Wall time | 119.51 s | 122.69 s | 357.44 s | 349.63 s |
+| Model calls | 9 | 9 | 43 | 44 |
+| Cumulative provider time | 110.89 s | 113.51 s | 327.87 s | 323.14 s |
+| Input tokens | 58,767 | 59,109 | 838,417 | 871,239 |
+| Output tokens | 4,885 | 4,906 | 12,234 | 11,590 |
+| Cached tokens | 3,968 | 47,872 | 53,120 | 768,768 |
+| Cache rate | 6.75% | 80.99% | 6.34% | 88.24% |
 
-Le transport est confirmé : Slop utilise une connexion, neuf requêtes et huit
-continuations. Sane utilise trois connexions successives (Discussion,
-planification Implement puis agent de construction), 44 requêtes et 39
-continuations. Aucun appel supplémentaire de récupération de continuation
-n'est compté. Le bloc d'instructions change toujours aux transitions Implement :
-cinq états successifs au total, comme lors du benchmark précédent.
+Transport is confirmed: Slop uses one connection, nine requests and eight
+continuations. Sane uses three successive connections (Discussion, Implement
+planning, construction agent), 44 requests and 39 continuations. No additional
+continuation-recovery call is counted. The instruction block still changes at
+Implement transitions: five successive states, as in the previous benchmark.
 
-Sane gagne **7,80 s, soit 2,18 %**, sur cette paire. Sa phase de construction
-passe de 308,82 s à 292,80 s (**−5,19 %**), tandis que ses planifications prennent
-plus longtemps. Il reste **2,85 fois plus lent que Slop**, contre 2,99 auparavant.
-Environ 92 % de l'écart actuel demeure dans les appels provider. Le cache
-augmente fortement, mais il ne supprime ni les réponses à générer ni les
-nombreux allers-retours : 17 rapports de progression et trois clôtures de step
-restent présents. On ne peut pas attribuer causalement ces quelques secondes au
-seul transport : une paire par configuration, générations non déterministes,
-plan et contenu différents, charges serveur non contrôlées.
+Sane gains **7.80 s, or 2.18%**, on this pair. Construction falls from 308.82 s to
+292.80 s (**−5.19%**), while planning takes longer. It remains **2.85 times slower
+than Slop**, versus 2.99 previously. About 92% of the gap is still in provider
+calls. Cache rate rises sharply, but removes neither generated responses nor
+round trips: 17 progress reports and three step completions remain. These few
+seconds cannot be causally attributed to transport alone: one pair per
+configuration, nondeterministic generations, different plans/content and
+uncontrolled server loads.
 
-Vérification hors temps mesuré : dix tests générés passent en Slop, quinze en
-Sane ; syntaxe des deux modules et sept mêmes contrôles indépendants passent
-dans chaque cas. `acceptance-ws.mjs` adapte uniquement les noms de fonctions et
-vérifie le mouvement résultant pour les modèles de direction différents. Aucun
-fichier généré n'a été corrigé par le vérificateur. Pas de contrôle navigateur réel.
+Untimed verification: ten generated tests pass in Slop, 15 in Sane; both modules'
+syntax and the same seven independent checks pass in each case.
+`acceptance-ws.mjs` adapts only function names and checks resulting movement for
+the different direction models. No generated files were corrected by the
+verifier. No real browser check.
 
-Artefacts locaux : `build-ai/benchmarks/snake-modes/snake-ws-slop-1/` et
-`snake-ws-sane-1/`, avec `result.json`, `models.jsonl`, `events.jsonl`, le prompt
-et les jeux produits. L'essai Sane a son code dans son checkout d'exécution
-sous `data/sos/worktrees/`, pas dans le dépôt utilisateur initial vide.
+Local artifacts: `build-ai/benchmarks/snake-modes/snake-ws-slop-1/` and
+`snake-ws-sane-1/`, with `result.json`, `models.jsonl`, `events.jsonl`, prompt and
+produced games. The Sane code is in its execution checkout under
+`data/sos/worktrees/`, not in the initially empty user repository.
 
-## WebSocket et continuation : contrôle Slop
+## WebSocket and continuation: Slop check
 
-Le transport Codex des conversations identifiées utilise un WebSocket TLS
-persistant (IXWebSocket 11.4.6). Quand les paramètres sont identiques et que
-l'entrée suivante conserve exactement l'entrée précédente plus sa réponse
-normalisée, il envoie `previous_response_id` avec seulement les nouveaux items.
-Un changement de contexte, outils, instructions ou modèle repart avec l'entrée
-complète. Aucune donnée de connexion/continuation n'est persistée dans l'historique.
+Codex transport for identified conversations uses a persistent TLS WebSocket
+(IXWebSocket 11.4.6). When parameters are identical and the next input exactly
+retains the previous input plus its normalized response, it sends
+`previous_response_id` with only new items. A change of context, tools,
+instructions or model restarts with full input. No connection/continuation data
+is persisted in history.
 
-Le handshake indisponible provoque un repli HTTP avant soumission de génération.
-Les environnements configurés avec un proxy HTTP restent sur curl pour ne pas
-contourner le proxy. Une rupture après soumission remonte au mécanisme normal de
-retry, sans rejeu silencieux de sortie partielle ni des outils. Une référence
-`previous_response_not_found` est retentée une fois avec le contexte complet.
-L'annulation ferme la connexion ; les connexions inactives depuis cinq minutes
-ou âgées de 55 minutes sont remplacées au prochain appel. Une nouvelle session
-ou une modification des headers d'authentification repart sur une autre connexion.
-Le header `x-codex-turn-state` et le traitement des instructions système restent
-inchangés.
+An unavailable handshake falls back to HTTP before generation submission.
+Environments configured with an HTTP proxy stay on curl to avoid bypassing it.
+A disconnect after submission reaches normal retry handling, without silent
+replay of partial output or tools. `previous_response_not_found` is retried once
+with full context. Cancellation closes the connection; connections idle for five
+minutes or aged 55 minutes are replaced on the next call. A new session or
+changed authentication headers uses another connection. The `x-codex-turn-state`
+header and system-instruction handling are unchanged.
 
-Même petite conversation de six échanges/sept appels que le contrôle ci-dessous,
-avec l'identité active dans les trois essais. Ordre : WS 1, HTTP, WS 2. Réponses
-correctes, une seule lecture ; instructions, outils et préfixes vérifiés stables.
+Same small conversation with six exchanges/seven calls as the check below,
+identity active in all three runs. Order: WS 1, HTTP, WS 2. Correct responses,
+one read; instructions, tools and prefixes verified stable.
 
-| Essai | Tokens cachés / entrée | Taux | Temps cumulé provider | Temps mural du client |
+| Run | Cached / input tokens | Rate | Cumulative provider time | Client wall time |
 | --- | ---: | ---: | ---: | ---: |
-| WebSocket 1 | 34 688 / 50 927 | 68,11 % | 17,09 s | 23,93 s |
-| HTTP avec identité | 42 368 / 50 879 | 83,27 % | 17,33 s | 24,99 s |
-| WebSocket 2 | 42 368 / 50 922 | 83,20 % | 16,86 s | 22,88 s |
+| WebSocket 1 | 34,688 / 50,927 | 68.11% | 17.09 s | 23.93 s |
+| HTTP with identity | 42,368 / 50,879 | 83.27% | 17.33 s | 24.99 s |
+| WebSocket 2 | 42,368 / 50,922 | 83.20% | 16.86 s | 22.88 s |
 
-Chaque essai WebSocket confirme **une connexion, sept requêtes et six
-continuations**, sans tentative supplémentaire : sept items d'entrée transmis
-au total, contre 49 en rejouant les fenêtres complètes de ces sept appels.
-Les outils et instructions restent dans chaque requête ; ce n'est pas une
-suppression de tous les tokens du contexte. L'usage provider compte toujours le
-contexte logique complet. La télémétrie enregistre uniquement des compteurs,
-empreintes et usages, jamais les credentials ou les corps de requêtes bruts.
+Each WebSocket run confirms **one connection, seven requests and six
+continuations**, without extra attempts: seven input items transmitted in total,
+versus 49 when replaying the full windows for all seven calls. Tools and
+instructions remain in each request; this does not remove all context tokens.
+Provider usage still counts the full logical context. Telemetry records only
+counters, hashes and usage, never credentials or raw request bodies.
 
-**Ce contrôle ne montre pas de hausse du taux de cache par rapport à HTTP avec
-identité.** Les temps sont proches et l'échantillon trop petit pour établir un
-gain de latence reproductible. La continuation fonctionne et réduit l'entrée
-transmise, mais ne justifie pas une promesse de cache systématique.
+**This check shows no cache-rate improvement over HTTP with identity.** Timings
+are close and the sample too small to establish a reproducible latency gain.
+Continuation works and reduces transmitted input, but does not justify a promise
+of systematic cache hits.
 
-Artefacts locaux sous `build-ai/benchmarks/snake-modes/` :
-`cache-websocket-slop-{1,2}/`, `cache-websocket-http-1/`. Le wrapper de mesure
-ajoute `transport.statistics` et permet le témoin via `SOS_BENCH_HTTP_ONLY=1`.
-Validation finale : 188 tests runtime réussis, 66 tests provider/session réussis
-et trois ignorés car non applicables. Le bundle installé n'a pas été reconstruit.
+Local artifacts under `build-ai/benchmarks/snake-modes/`:
+`cache-websocket-slop-{1,2}/`, `cache-websocket-http-1/`. The measurement wrapper
+adds `transport.statistics` and enables the control through `SOS_BENCH_HTTP_ONLY=1`.
+Final validation: 188 runtime tests pass, 66 provider/session tests pass and
+three are skipped as inapplicable. The installed bundle was not rebuilt.
 
-## Identité de session Codex : contrôle Slop
+## Codex session identity: Slop check
 
-Le provider Codex transmet désormais l'identifiant persisté de la conversation
-dans le header `session-id` et dans `prompt_cache_key`. L'identité reste stable
-après reprise et remplacement du provider ; deux conversations gardent des
-identités distinctes. Ces champs ne sont pas ajoutés aux requêtes OpenAI API.
-La transformation des instructions système n'est pas modifiée ici. Ce correctif
-n'ajoute ni WebSocket ni reprise du header de routage `x-codex-turn-state`.
+The Codex provider sends the persisted conversation ID in the `session-id` header
+and `prompt_cache_key`. Identity remains stable after resume and provider
+replacement; two conversations keep distinct identities. These fields are not
+added to OpenAI API requests. System-instruction transformation is unchanged.
+This fix adds neither WebSocket nor reuse of the `x-codex-turn-state` routing header.
 
-Vérification réelle avec les mêmes réglages que Snake : six échanges Slop,
-lecture d'un fichier synthétique de 120 règles puis cinq questions courtes sur
-son contenu. Chaque essai utilise les vrais `Integration`, `Session`, `Agent`
-et provider, avec sept appels modèle. Les réponses ont été vérifiées : valeurs
-correctes, aucune relecture après la première question, aucun fichier modifié.
+Real check with the same settings as Snake: six Slop exchanges, reading a
+synthetic 120-rule file then asking five short questions about it. Each run uses
+real `Integration`, `Session`, `Agent` and provider classes, with seven model
+calls. Answers were checked: correct values, no rereading after the first
+question, no modified files.
 
-| Essai | Entrée cumulée | Tokens cachés | Taux |
+| Run | Cumulative input | Cached tokens | Rate |
 | --- | ---: | ---: | ---: |
-| Avec identité, essai 1 | 50 894 | 34 560 | 67,91 % |
-| Témoin sans identité | 50 866 | 0 | 0 % |
-| Avec identité, essai 2 | 50 894 | 26 880 | 52,82 % |
+| With identity, run 1 | 50,894 | 34,560 | 67.91% |
+| Control without identity | 50,866 | 0 | 0% |
+| With identity, run 2 | 50,894 | 26,880 | 52.82% |
 
-Ordre : identité 1, témoin, identité 2. Le témoin désactive uniquement l'envoi
-de l'identité dans le wrapper de mesure. Même fixture et mêmes questions, mais
-répertoires et sessions distincts et réponses modèle non déterministes.
-Les hits après lecture atteignent 97–99 % ; certains appels restent à zéro.
-Ce petit contrôle montre la réutilisation effective du cache avec l'identité,
-pas un taux garanti, une mesure isolée de chacun des deux champs, ni un gain
-de latence établi : le témoin dure environ 25,5 s contre 29,3 s et 24,1 s avec
-identité. Le cache déclaré et la latence ne sont pas interchangeables.
+Order: identity 1, control, identity 2. The control disables only identity
+transmission in the measurement wrapper. Same fixture/questions, but distinct
+directories/sessions and nondeterministic model answers. Hits after reading reach
+97–99%; some calls stay at zero. This small check demonstrates actual cache reuse
+with identity, not a guaranteed rate, an isolated measurement of each field, or
+an established latency gain: the control takes about 25.5 s versus 29.3 s and
+24.1 s with identity. Reported cache and latency are not interchangeable.
 
-Artefacts locaux : `build-ai/benchmarks/snake-modes/cache_conversation.py`,
-`cache-session-slop-{1,2}/` et `cache-session-control-1/`, contenant prompts,
-événements, usages et `cache-result.json`. Le wrapper de contrôle utilise
-`SOS_BENCH_OMIT_SESSION_ID=1`, uniquement dans le daemon de mesure.
+Local artifacts: `build-ai/benchmarks/snake-modes/cache_conversation.py`,
+`cache-session-slop-{1,2}/` and `cache-session-control-1/`, containing prompts,
+events, usage and `cache-result.json`. The control wrapper uses
+`SOS_BENCH_OMIT_SESSION_ID=1`, only in the measurement daemon.
 
-## Snake : comparaison avec le vrai modèle
+## Snake: real-model comparison
 
-Un même cahier des charges demande un Snake navigateur sans dépendances : six
-fichiers, grille 20×20, flèches/WASD, nourriture, croissance/score, collisions,
-pause/reprise, restart et tests déterministes avec Node. Deux dépôts Git neufs
-séparés ont été utilisés sous `build-ai/benchmarks/snake-modes/`.
+The same specification requests a dependency-free browser Snake: six files,
+20×20 grid, arrows/WASD, food, growth/score, collisions, pause/resume, restart and
+deterministic Node tests. Two separate fresh Git repositories were used under
+`build-ai/benchmarks/snake-modes/`.
 
-Les essais passent par les vraies classes `Integration`, `Session`, `Agent`, les
-outils et les providers de SOS. Un exécutable de mesure ajoute uniquement un
-wrapper de télémétrie au provider et isole le stockage. L'authentification reste
-dans le fichier officiel existant, sans copie des credentials dans le dépôt.
-La configuration sélectionnée est identique : OpenAI `gpt-6.1-sol`, raisonnement
-`medium`, contexte 272 000, politique Auto/Jev au seuil 60 %. Jev reste activé.
+Runs use real SOS `Integration`, `Session`, `Agent`, tools and providers. A
+measurement executable adds only a telemetry wrapper to the provider and isolates
+storage. Authentication stays in the existing official file; credentials are not
+copied into the repository. Identical selected configuration: OpenAI
+`gpt-6.1-sol`, `medium` reasoning, 272,000-token context, Auto/Jev at 60%.
+Jev remains enabled.
 
-Slop construit directement. Sane suit le parcours Objective Plan, ouverture de
-branche, Auto plan puis Everything. Le chrono Sane inclut ces deux planifications,
-la préparation du checkout et la construction jusqu'à la clôture technique.
-Aucune attente humaine ni validation/import humain n'est incluse. La TUI n'est pas
-exécutée : ce test isole le moteur et ne mesure pas sa réactivité graphique.
+Slop builds directly. Sane follows Objective Plan, branch opening, Auto plan,
+then Everything. Sane timing includes both planning stages, checkout preparation
+and construction through technical completion. No human waiting, human validation
+or import is included. The TUI is not run: this isolates the engine and does not
+measure graphical responsiveness.
 
-### Résultats
+### Results
 
-| Mesure | Slop | Sane |
+| Measurement | Slop | Sane |
 | --- | ---: | ---: |
-| Temps mural | 119,51 s | 357,44 s |
-| Nombre d'appels modèle | 9 | 43 |
-| Durée cumulée des appels modèle | 110,89 s | 327,87 s |
-| Reste du temps mural | 8,62 s | 29,57 s |
-| Tokens d'entrée cumulés | 58 767 | 838 417 |
-| Tokens de sortie cumulés | 4 885 | 12 234 |
-| Tokens d'entrée déclarés cachés | 3 968 (6,75 %) | 53 120 (6,34 %) |
+| Wall time | 119.51 s | 357.44 s |
+| Model call count | 9 | 43 |
+| Cumulative model call time | 110.89 s | 327.87 s |
+| Remaining wall time | 8.62 s | 29.57 s |
+| Cumulative input tokens | 58,767 | 838,417 |
+| Cumulative output tokens | 4,885 | 12,234 |
+| Input tokens reported cached | 3,968 (6.75%) | 53,120 (6.34%) |
 
-Sane prend **2,99 fois** le temps de Slop sur cette paire. Parmi les **237,92 s**
-supplémentaires, **216,97 s**, soit environ **91 %**, sont passées dans les appels
-au modèle, pas dans les snapshots ou l'affichage. Les durées provider comprennent
-le transport et le traitement serveur ; elles ne mesurent pas séparément le
-raisonnement, le préremplissage et la génération.
+Sane takes **2.99 times** as long as Slop on this pair. Of the additional
+**237.92 s**, **216.97 s**, about **91%**, are spent in model calls, not snapshots
+or display. Provider durations include transport and server processing; they do
+not separately measure reasoning, prefill and generation.
 
-Les phases Sane observées sont : Objective Plan 22,39 s, ouverture 0,02 s,
-Implementation Plan 26,20 s, construction/préparation 308,82 s. Même sans la
-planification, la construction Sane prend environ 2,58 fois le tour Slop entier.
+Observed Sane phases: Objective Plan 22.39 s, opening 0.02 s, Implementation Plan
+26.20 s, construction/preparation 308.82 s. Even without planning, Sane construction
+takes about 2.58 times the entire Slop turn.
 
-### Origine des appels supplémentaires
+### Sources of additional calls
 
-| Type de réponse modèle | Slop : appels / durée | Sane : appels / durée |
+| Model response type | Slop: calls / duration | Sane: calls / duration |
 | --- | ---: | ---: |
-| Rapports de progression | 0 | 17 / 53,12 s |
-| Clôtures techniques de steps | 0 | 3 / 23,90 s |
-| Publication Objective Plan + Implementation Plan | 0 | 2 / 37,57 s |
-| Lectures | 1 / 2,37 s | 7 / 27,01 s |
-| Écriture / édition | 6 / 100,80 s | 7 / 137,75 s |
-| Commandes de contrôle | 1 / 2,42 s | 5 / 43,89 s |
-| Texte final sans outil | 1 / 5,31 s | 2 / 4,61 s |
+| Progress reports | 0 | 17 / 53.12 s |
+| Technical step completions | 0 | 3 / 23.90 s |
+| Objective Plan + Implementation Plan publication | 0 | 2 / 37.57 s |
+| Reads | 1 / 2.37 s | 7 / 27.01 s |
+| Writing/editing | 6 / 100.80 s | 7 / 137.75 s |
+| Check commands | 1 / 2.42 s | 5 / 43.89 s |
+| Final text without tools | 1 / 5.31 s | 2 / 4.61 s |
 
-Les comptes de ce tableau désignent les **réponses modèle**, pas les appels
-individuels d'outils. Une réponse Sane groupe trois lectures, d'où neuf appels
-`read` pour sept réponses de lecture.
+Counts refer to **model responses**, not individual tool calls. One Sane response
+groups three reads, hence nine `read` calls in seven reading responses.
 
-Le modèle a proposé trois steps et sept substeps : moteur, interface, puis
-documentation/vérification finale. Cette décomposition provoque plusieurs effets :
+The model proposed three steps and seven substeps: engine, interface, then
+documentation/final verification. This decomposition has several effects:
 
-- Les 17 rapports de progression sont tous émis dans des réponses séparées. Le
-  moteur permet déjà les appels ordonnés groupés et le prompt le demande, mais
-  ce groupement n'a pas été utilisé pour ces annonces pendant cet essai.
-- Les frontières obligatoires ajoutent des allers-retours modèle ; leur coût ne
-  se limite donc pas à la capture locale effectuée par l'outil de progression.
-- Chaque nouveau step relit une partie du travail précédent et relance des
-  contrôles. La vérification finale devient même une substep planifiée, puis la
-  phase de validation du step déclenche encore des contrôles. Des inspections
-  supplémentaires sont faites pour rassurer le modèle alors que la construction
-  est déjà préservée.
-- Sane génère aussi davantage de contenu : tests plus développés, explications,
-  plans et petits scripts de vérification supplémentaires. Son moteur est créé
-  puis complété dans un second edit ; Slop écrit son moteur en une fois.
-- Les multiples appels transportent une conversation grandissante : le dernier
-  appel Slop a 9 220 tokens d'entrée, contre 35 332 pour le dernier appel Sane.
-  Les 17 réponses de progression représentent à elles seules 342 790 tokens
-  d'entrée cumulés.
+- All 17 progress reports use separate responses. The engine already supports
+  grouped ordered calls and the prompt requests them, but this run did not group
+  those announcements.
+- Required boundaries add model round trips; their cost is not limited to the
+  progress tool's local capture.
+- Each new step rereads some prior work and reruns checks. Final verification
+  becomes a planned substep, then step validation triggers further checks. Extra
+  inspections reassure the model even though construction is already preserved.
+- Sane also generates more content: more developed tests, explanations, plans and
+  extra small verification scripts. Its engine is created then completed in a
+  second edit; Slop writes its engine in one pass.
+- Repeated calls carry a growing conversation: the last Slop call has 9,220 input
+  tokens versus 35,332 for Sane. The 17 progress responses alone account for
+  342,790 cumulative input tokens.
 
-Le principal problème reproduit ici est donc une **orchestration trop fractionnée
-et répétitive**, pas un outil d'édition quatre fois plus lent.
+The main reproduced problem is **overly fragmented, repetitive orchestration**,
+not an editing tool that is four times slower.
 
-### Cache et intégrité du préfixe
+### Cache and prefix integrity
 
-La télémétrie conserve taille et empreintes, pas les requêtes brutes ni les
-credentials. Pour les boucles observées, chaque nouvel input conserve tous les
-anciens items du précédent input comme préfixe exact. Les descriptions d'outils
-restent stables pendant la construction. Le groupe de messages système change
-aux frontières de steps ; l'adaptateur Codex les regroupe dans `instructions`.
+Telemetry keeps sizes and hashes, not raw requests or credentials. In the
+observed loops, every new input retains all previous input items as an exact
+prefix. Tool descriptions remain stable during construction. System messages
+change at step boundaries; the Codex adapter groups them into `instructions`.
 
-Le cache déclaré est faible dans **les deux modes**, environ 6 % du volume
-cumulé. Ce test ne permet donc pas d'attribuer spécifiquement l'écart à une
-réécriture générale des messages Sane ou à une défaillance de cache propre à
-Sane. Le routage/cache fournisseur et l'effet exact des changements de
-`instructions` restent à examiner séparément.
+Reported cache is low in **both modes**, about 6% of cumulative input. This test
+cannot specifically attribute the gap to a general rewrite of Sane messages or
+a Sane-specific cache failure. Provider routing/cache and the exact effect of
+`instructions` changes need separate examination.
 
-### Vérification et limites
+### Verification and limitations
 
-Les deux implémentations passent leurs tests générés : neuf tests Slop et quatorze
-Sane. Après les chronos, les deux passent aussi les sept mêmes contrôles de
-réception du moteur, indépendants des tests générés, ainsi que les contrôles de
-syntaxe de `snake.mjs` et `main.mjs`. Aucun vrai navigateur n'a été utilisé ;
-le rendu et les interactions dans un navigateur réel restent non vérifiés.
+Both implementations pass their generated tests: nine Slop and 14 Sane. After
+timing, both also pass the same seven engine acceptance checks, independent of
+the generated tests, and syntax checks for `snake.mjs` and `main.mjs`. No real
+browser was used; real-browser rendering and interactions remain unverified.
 
-Une seule paire terminée est mesurée. Les sorties ne sont pas identiques et les
-performances du fournisseur varient : ce n'est ni une médiane représentative ni
-une preuve d'un facteur constant ×3/×4. Deux essais de mise au point du client,
-interrompus sur un champ `session.created` puis une réponse de transfert de
-branche, sont exclus ; aucun essai arrivé à terme n'a été écarté. Le build utilisé
-est celui de `build-ai`, sans optimisation explicite dans la commande inspectée.
+Only one completed pair is measured. Outputs differ and provider performance
+varies: this is neither a representative median nor proof of a constant ×3/×4
+factor. Two client-development runs, interrupted at a `session.created` field
+then a branch-transfer response, are excluded; no completed run was discarded.
+The build used is `build-ai`, without explicit optimization in the inspected command.
 
-Artefacts locaux : `slop-2/result.json`, `sane-2/result.json`, `models.jsonl`
-par essai (durées, usage/cache, empreintes et outils), `events.jsonl`,
-`verification.json`, prompt et sources générées. Le client reproductible est
-`run.py`, le daemon instrumenté est `daemon.cpp`, les contrôles communs sont dans
-`acceptance.mjs`, sous `build-ai/benchmarks/snake-modes/`.
+Local artifacts: `slop-2/result.json`, `sane-2/result.json`, per-run `models.jsonl`
+(durations, usage/cache, hashes and tools), `events.jsonl`, `verification.json`,
+prompt and generated sources. The reproducible client is `run.py`, the instrumented
+daemon is `daemon.cpp`, and common checks are in `acceptance.mjs`, under
+`build-ai/benchmarks/snake-modes/`.
 
-## Snapshots : mesure locale sans modèle
+## Snapshots: local measurement without a model
 
-Le microbenchmark indépendant sous `build-ai/benchmarks/snapshot-cost/` appelle
-le vrai code de snapshot/édition, sans modèle, Jev ou TUI. Chaque cellule
-récurrente est la médiane de cinq mesures après une première capture neuve.
-Les fichiers synthétiques sont uniques et suivis par Git ; les caches système
-ne sont pas vidés.
+The independent microbenchmark under `build-ai/benchmarks/snapshot-cost/` calls
+real snapshot/editing code, without a model, Jev or TUI. Each recurring cell is
+the median of five measurements after an initial fresh capture. Synthetic files
+are unique and Git-tracked; system caches are not flushed.
 
-| Dépôt | Volume source | Capture sans changement | Petit edit Slop | Petit edit Implement |
+| Repository | Source volume | Unchanged capture | Small Slop edit | Small Implement edit |
 | --- | ---: | ---: | ---: | ---: |
-| 1 000 × 4 Kio | 3,9 Mio | 0,287 s | 0,407 s | 0,524 s |
-| 10 000 × 4 Kio | 39,1 Mio | 1,315 s | 1,276 s | 1,717 s |
-| 30 000 × 4 Kio | 117,2 Mio | 3,751 s | 3,303 s | 4,016 s |
-| 10 000 × 64 Kio | 625 Mio | 2,531 s | 2,842 s | 3,088 s |
+| 1,000 × 4 KiB | 3.9 MiB | 0.287 s | 0.407 s | 0.524 s |
+| 10,000 × 4 KiB | 39.1 MiB | 1.315 s | 1.276 s | 1.717 s |
+| 30,000 × 4 KiB | 117.2 MiB | 3.751 s | 3.303 s | 4.016 s |
+| 10,000 × 64 KiB | 625 MiB | 2.531 s | 2.842 s | 3.088 s |
 
-Sur 30 000 fichiers, les milestones début/fin prennent respectivement 4,13 et
-3,98 s supplémentaires. Une substep de cinq edits représente donc environ
-28,2 s de traitement local Implement contre 16,5 s Slop, hors préparation/fin
-de tour et modèle. C'est une estimation fondée sur les mesures, pas un temps
-intégralement supprimable sans préserver les garanties historiques.
+With 30,000 files, start/end milestones take an additional 4.13 and 3.98 s,
+respectively. A five-edit substep therefore represents about 28.2 s of local
+Implement processing versus 16.5 s for Slop, excluding turn preparation/completion
+and model time. This is a measurement-based estimate, not time that can all be
+removed without preserving historical guarantees.
 
-La capture complète recalcule les hashes et reconstruit l'index privé après
-chaque edit dans les deux modes. Implement ajoute l'attribution des changements
-et les captures de progression. Git déduplique le stockage, mais ne supprime pas
-ce travail de lecture/calcul répété.
+Full capture recalculates hashes and rebuilds the private index after every edit
+in both modes. Implement adds change attribution and progress captures. Git
+deduplicates storage but does not remove repeated reading/computation.
 
-Une piste supplémentaire, **non mesurée séparément**, est le `poll(..., 100)`
-dans `core/process.cpp` : sorties fermées avant constat de fin du processus,
-l'attente peut ajouter jusqu'à 100 ms. Cette hypothèse ne doit pas être présentée
-comme l'explication établie des temps du microbenchmark.
+Another lead, **not separately measured**, is `poll(..., 100)` in
+`core/process.cpp`: if output closes before process termination is detected,
+waiting can add up to 100 ms. This hypothesis must not be presented as the
+established explanation of the microbenchmark timings.
 
-Le rapport local détaillé est `build-ai/benchmarks/snapshot-cost/RESULTS.md`.
+Detailed local report: `build-ai/benchmarks/snapshot-cost/RESULTS.md`.
 
-## Priorités proposées
+## Proposed priorities
 
-Aucune optimisation de comportement n'est appliquée par cette investigation.
-Les pistes à comparer expérimentalement sont : grouper les annonces avec les
-outils lorsqu'aucune décision ne dépend du résultat intermédiaire, éviter les
-steps/substeps de vérification redondants, limiter les relectures et résumés
-répétés, puis stabiliser le contexte et mesurer le cache. Les captures
-incrémentales et la suppression des captures redondantes restent utiles pour
-les gros dépôts, mais elles ne résoudraient pas à elles seules le facteur ×3
-observé sur ce petit Snake.
+This investigation applies no behavioral optimization. Leads to compare
+experimentally: group announcements with tools when no decision depends on an
+intermediate result, avoid redundant verification steps/substeps, limit rereading
+and repeated summaries, then stabilize context and measure caching. Incremental
+captures and removal of redundant captures remain useful for large repositories,
+but alone would not resolve the ×3 factor observed on this small Snake task.

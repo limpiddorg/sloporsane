@@ -113,6 +113,7 @@ TEST(CompactionTest, ReviewSummaryPreservesConcreteEvidenceUsesSelectedModelAndR
     EXPECT_NE(provider.input.dump().find("state.cpp unchanged"), std::string::npos);
     EXPECT_NE(provider.input.dump().find("no correction accepted"), std::string::npos);
     EXPECT_NE(provider.input.dump().find("Distinguish proposals from accepted decisions"), std::string::npos);
+    EXPECT_NE(provider.input.dump().find("summary in English, even when the user writes in another language"), std::string::npos);
     EXPECT_THROW(CompactionService::summarizeReview(messages, provider, selection, [] { return true; }), core::Cancelled);
     provider.response["output"][0]["content"][0]["text"] = "   ";
     EXPECT_THROW(CompactionService::summarizeReview(messages, provider, selection, {}), std::runtime_error);
@@ -461,6 +462,7 @@ TEST(CompactionTest, SummarizesOnlyTheHeadWithoutToolsAndKeepsCompleteRecentTurn
     EXPECT_EQ(provider.reasoning, "high");
     EXPECT_TRUE(provider.tools.empty());
     EXPECT_NE(provider.input.dump().find("Old request"), std::string::npos);
+    EXPECT_NE(provider.input.dump().find("summary in English, even when the conversation is in another language"), std::string::npos);
     EXPECT_EQ(provider.input.dump().find("Recent request"), std::string::npos);
     EXPECT_EQ(provider.input.dump().find("OLD_END"), std::string::npos);
     EXPECT_NE(provider.input.dump().find("[truncated]"), std::string::npos);

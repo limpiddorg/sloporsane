@@ -30,7 +30,7 @@ private:
     bool registered() const;
     std::optional<std::pair<GitSnapshotId, GitSnapshotId>> pendingImport(
         std::size_t step, const TurnSnapshot& snapshot, const GitSnapshot& target);
-    std::string git(const std::filesystem::path& cwd, const std::vector<std::string>& args) const;
+    std::string git(const std::filesystem::path& cwd, const std::vector<std::string>& args, int allowedExitCode = 0) const;
     std::string commit(const std::string& tree, const std::string& parent, const std::string& label);
     void save();
     std::filesystem::path storageDirectory;

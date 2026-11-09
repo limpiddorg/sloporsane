@@ -2025,6 +2025,7 @@ class ImplementationWorkspaceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.workspace.query_one("#implementation-accepted-plan").display)
         self.assertEqual(self.workspace.query_one(ImplementationChangesTree).files, {})
         plan_view = self.workspace.query_one("#implementation-accepted-plan")
+        self.assertFalse(self.workspace.query_one(ImplementationChangesTree).display)
         self.assertGreaterEqual(plan_view.region.x, self.workspace.query_one("#implementation-main").region.x)
         self.assertIn("Accepted foundation plan", plan_view.query_one("ResponseMarkdown")._markdown)
         button = self.workspace.query_one("#implementation-show-plan")
@@ -2037,6 +2038,7 @@ class ImplementationWorkspaceTest(unittest.IsolatedAsyncioTestCase):
         await self.pilot.pause()
         self.assertTrue(self.workspace.display)
         self.assertFalse(self.workspace.plan_visible)
+        self.assertTrue(self.workspace.query_one(ImplementationChangesTree).display)
         self.assertEqual(self.app.session_id, "branch")
         self.assertEqual(self.app.client.send.await_count, 0)
 
@@ -2053,6 +2055,45 @@ class ImplementationWorkspaceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.workspace.display)
         self.assertEqual(self.workspace.selection, selection)
         self.app.client.send.assert_not_awaited()
+
+    async def test_finished_implementation_closes_on_return_to_discussion(self):
+        value = state()
+        value.update(status="completed", work_step=2)
+        for step in value["steps"]:
+            step["whole"].update(complete=True, reviewed=True)
+        self.workspace.apply_state(value)
+        self.workspace.open_conclusion()
+        self.assertFalse(self.workspace.query_one(ImplementationChangesTree).display)
+        await self.app.implementation.select_tab("discussion")
+        request = self.app.client.send.call_args.args[0]
+        self.assertEqual(request["type"], "implementation.close")
+        self.assertFalse(self.app.implementation.discussion_preview)
+        info = {"discussion_id": "discussion", "implementation_view": False,
+                "implementation_execution": False, "implementation_archive": False,
+                "active_implementation_id": "", "objective_plan_ready": False,
+                "implementation_plan": None, "implementation_plan_ready": False}
+        common = {"requestId": request["requestId"], "sessionId": "discussion", "messageCount": 0, "info": info}
+        self.app.handle_event(dict(common, type="session.attach_started", page={}, session={
+            "id": "discussion", "workspace": self.app.workspace, "title": "Discussion", "mode": "sane"}))
+        self.app.handle_event(dict(common, type="session.attached"))
+        await self.app.workers.wait_for_complete()
+        await self.pilot.pause()
+        self.assertEqual(self.app.session_id, "discussion")
+        self.assertFalse(self.workspace.display)
+        self.assertTrue(self.app.query_one("#composer").display)
+        self.assertFalse(self.app.query_one("#tabs").query("#implement"))
+        entry = self.app.query_one("#message", MessageInput)
+        self.assertFalse(entry.disabled)
+        entry.focus()
+        await self.pilot.press("n", "e", "w")
+        self.assertEqual(entry.text, "new")
+
+    async def test_archive_returns_to_editable_discussion_instead_of_preview(self):
+        self.app.runtime_info.update(implementation_archive=True, active_implementation_id="")
+        with patch.object(self.app.implementation, "request", new_callable=AsyncMock) as request:
+            await self.app.implementation.select_tab("discussion")
+            request.assert_awaited_once_with("implementation.view")
+        self.assertFalse(self.app.implementation.discussion_preview)
 
     async def test_discussion_is_read_only_during_review_without_losing_step_or_draft(self):
         from sos_tui.discussion_preview import DiscussionPreview

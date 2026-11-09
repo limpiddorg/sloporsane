@@ -48,6 +48,72 @@ class ObjectiveDrawerTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.app.query_one(ObjectiveWorkspace).display)
         self.assertGreater(self.chat.size.width, 110)
 
+    async def test_mode_switch_keeps_historical_sane_drawer_and_its_expansion_visible(self):
+        plan = version(1, "Current objective")
+        await self.restore([message("a")], [{"message_id": "a", "objective_id": plan["id"], "updated": True}], [plan])
+        drawer = self.chat.query_one(ObjectivePlanDrawer)
+        await self.open(drawer)
+        self.app.set_mode("slop")
+        await self.pilot.pause()
+        self.assertTrue(drawer.display)
+        self.app.set_mode("sane")
+        await self.pilot.pause()
+        self.assertTrue(drawer.display)
+        self.assertFalse(drawer.collapsed)
+        self.assertIn("Current objective", drawer.query_one(ResponseMarkdown)._markdown)
+
+    async def test_slop_turns_and_completed_objective_only_affect_future_drawers(self):
+        first, updated, next_plan = (version(1, "First objective"), version(2, "Updated objective"),
+                                     version(3, "Next objective"))
+        records = [message("u1", "user"), first, message("a1")]
+        turns = [{"message_id": "a1", "objective_id": first["id"], "updated": True}]
+        await self.restore(records, turns, [first])
+        original = self.chat.query_one(ObjectivePlanDrawer)
+        await self.open(original)
+
+        self.app.set_mode("slop")
+        self.app.display_live_messages([message("u2", "user"), message("a2")])
+        await self.pilot.pause()
+        self.assertEqual(list(self.chat.query(ObjectivePlanDrawer)), [original])
+        self.assertTrue(original.display)
+        self.assertFalse(original.collapsed)
+
+        self.app.set_mode("sane")
+        self.app.display_live_messages([message("u3", "user"), message("a3")])
+        turns.append({"message_id": "a3", "objective_id": first["id"], "updated": False})
+        self.app.update_agent_info({"objective_plan_turns": turns})
+        await self.pilot.pause()
+        carried = list(self.chat.query(ObjectivePlanDrawer))[-1]
+        self.assertEqual(carried.selected_id, first["id"])
+        self.assertEqual(str(carried.title), "Objective plan")
+
+        self.app.display_live_messages([message("u4", "user"), updated, message("a4")])
+        turns.append({"message_id": "a4", "objective_id": updated["id"], "updated": True})
+        self.app.update_agent_info({"objective_plans": [first, updated], "objective_plan_turns": turns})
+        await self.pilot.pause()
+        historical = list(self.chat.query(ObjectivePlanDrawer))
+        self.assertEqual([drawer.selected_id for drawer in historical], [first["id"], first["id"], updated["id"]])
+        self.assertTrue(historical[-1].has_class("updated"))
+
+        self.app.update_agent_info({"objective_plan_ready": False, "implementation_branches": [
+            {"id": "implementation", "objective_id": updated["id"]}]})
+        self.app.display_live_messages([message("u5", "user"), message("a5")])
+        await self.pilot.pause()
+        self.assertEqual(list(self.chat.query(ObjectivePlanDrawer)), historical)
+        link = historical[-1].query_one(".objective-link", Button)
+        self.assertTrue(link.display)
+        self.assertEqual(str(link.label), "Implementation")
+        self.assertFalse(original.collapsed)
+        self.assertIn("First objective", original.query_one(ResponseMarkdown)._markdown)
+
+        self.app.display_live_messages([message("u6", "user"), next_plan, message("a6")])
+        turns.append({"message_id": "a6", "objective_id": next_plan["id"], "updated": True})
+        self.app.update_agent_info({"objective_plans": [first, updated, next_plan], "objective_plan_turns": turns})
+        await self.pilot.pause()
+        drawers = list(self.chat.query(ObjectivePlanDrawer))
+        self.assertEqual(drawers[:-1], historical)
+        self.assertEqual(drawers[-1].selected_id, next_plan["id"])
+
     async def test_one_frozen_drawer_after_last_assistant_per_turn_and_updated_only_when_published(self):
         first, second = version(1, "First plan"), version(2, "Second plan")
         records = [message("u1", "user"), message("intermediate"), first, message("a1"),

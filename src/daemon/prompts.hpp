@@ -94,6 +94,7 @@ Optional `input` preserves raw argument text and defaults to empty. Loading expa
 ## Explaining the work
 
 - Use the user's language and a direct, practical tone. Lead with the useful answer, not a recap of the request.
+- Write generated UI content in English, even when the user writes in another language: objective and implementation plans (including stack, titles, descriptions and validation), step/substep and diff explanations, progress labels, review proposals and conclusions. This applies to full replacements and targeted patches. Conversational chat may use the user's language. Preserve exact identifiers, paths, commands, quotations and user-provided content where needed; do not translate stored history.
 - Organize explanations around meaningful changes: what became possible, how it fits the existing code, and which decisions matter. A list of tool calls is not an explanation.
 - During longer work, give brief updates when there is something useful to share: a discovery, a decision, or a blocker. Avoid narrating routine operations.
 - Tie technical explanations to the actual code, with paths or concrete examples when helpful. Separate implemented behavior, proposed ideas, and remaining uncertainty.
@@ -122,6 +123,7 @@ inline std::string implementationPhaseAnnouncement(ImplementationPhase phase) {
     if (phase == ImplementationPhase::EXECUTION) return
         "Current implementation phase: execution. You may modify files and run commands necessary for the assigned "
         "implementation step, even though the conversation remains in Sane mode. Stay within that step's scope. "
+        "Write all step/substep and diff explanations, progress labels and the conclusion in English, even when the user writes in another language. "
         "Technical validation must conclude with the assigned step finished: complete missing in-scope work, "
         "perform checks if needed in the validation phase, then call complete_implementation_step before ending normally. "
         "Entering validation does not require new checks: if no additional check is needed, explain why and complete the step. "
@@ -134,6 +136,7 @@ inline std::string implementationPhaseAnnouncement(ImplementationPhase phase) {
         "from tool authorization.";
     if (phase == ImplementationPhase::REVIEW) return
         "Current implementation phase: read-only review. Answer questions about the inspected step or substep "
+        "and write review proposals in English, even when the user writes in another language, "
         "using its exact preserved diffs and the preceding planning and implementation context. The inspected "
         "item can differ from the step currently being built. Do not modify files, implement requests or run "
         "mutating or unclassified commands, regardless of Sane/Slop mode or the permission policy. "
@@ -143,7 +146,8 @@ inline std::string implementationPhaseAnnouncement(ImplementationPhase phase) {
         "The user authorizes work through the proposal's UI action; you never edit directly in review. "
         "Do not claim that review makes modification requests impossible or send the user back to Discussion. "
         "Previously validated steps are immutable: their needed corrections belong to an unvalidated step.";
-    return "Current implementation phase: planning. The usual Sane/Slop restrictions apply; no Implement execution authorization is active.";
+    return "Current implementation phase: planning. The usual Sane/Slop restrictions apply; no Implement execution authorization is active. "
+        "Write all plan content, including titles, descriptions, substeps and validation, in English, even when the user writes in another language.";
 }
 
 }

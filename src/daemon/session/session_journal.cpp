@@ -332,7 +332,11 @@ std::string SessionJournal::lastUserMessage() const {
 }
 bool SessionJournal::objectivePlanReady() const {
     const auto& messages = summaries();
-    return std::any_of(messages.begin(), messages.end(), [](const auto& message) { return message.objectivePlan; });
+    for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
+        if (it->objectiveCompleted) return false;
+        if (it->objectivePlan) return true;
+    }
+    return false;
 }
 bool SessionJournal::implementationPlanReady() const { return planReady(true); }
 bool SessionJournal::planReady(bool implementation) const {
@@ -363,6 +367,7 @@ Message SessionJournal::summarize(const Message& message) {
     result.modelCall = message.modelCall;
     result.recap = message.recap;
     result.objectivePlan = message.objectivePlan;
+    result.objectiveCompleted = message.objectiveCompleted;
     result.implementationPlan = message.implementationPlan;
     result.userSkill = message.userSkill;
     result.images = message.images;

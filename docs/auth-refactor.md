@@ -1,15 +1,14 @@
-# Refactoring de l'orchestration des providers
+# Provider orchestration refactoring
 
-> Note de conception historique du refactoring, pas un contrat de compatibilité.
-> Les formats effectivement acceptés sont décrits dans `daemon-protocol.md` et
-> `mcp.md` ; aucune migration des anciennes données internes n'est garantie.
+> Historical design note for the refactoring, not a compatibility contract.
+> Accepted formats are described in `daemon-protocol.md` and `mcp.md`;
+> migration of older internal data is not guaranteed.
 
-## Stratégie
+## Strategy
 
-`Integration` doit exprimer les décisions de session et déléguer les détails de
-connexion. Elle ne doit plus connaître les tokens, le verrou du stockage, le
-callback OpenAI ou les futures OAuth. Les callbacks de test du titre et du catalogue
-restent injectables.
+`Integration` should express session decisions and delegate connection details.
+It should no longer know about tokens, the storage lock, the OpenAI callback or
+OAuth futures. Title and catalog test callbacks remain injectable.
 
 ```mermaid
 flowchart TD
@@ -23,12 +22,12 @@ flowchart TD
     S --> F
 ```
 
-## Interfaces résultantes
+## Resulting interfaces
 
-### Requêtes de connexion — nouveau module `daemon/providers/provider_connection.hpp`
+### Connection requests: new module `daemon/providers/provider_connection.hpp`
 
-Les commandes sont typées dès la frontière JSON. Le secret n'existe plus comme
-attribut général de la requête d'intégration.
+Commands are typed at the JSON boundary. The secret is no longer a general
+attribute of the integration request.
 
 ```cpp
 enum class ProviderCommand { LIST, API_KEY, START_OAUTH, POLL_OAUTH, CANCEL_OAUTH, SELECT };
@@ -71,13 +70,13 @@ private:
 };
 ```
 
-### `ProviderConnections` — classe modifiée
+### `ProviderConnections`: changed class
 
-Fichiers : `daemon/providers/provider_connections.hpp/.cpp`. Le stockage et son
-verrou deviennent privés ; les appelants expriment seulement l'opération souhaitée.
+Files: `daemon/providers/provider_connections.hpp/.cpp`. Storage and its lock
+become private; callers express only the desired operation.
 
 ```cpp
-struct ProviderDescriptor { // AJOUT
+struct ProviderDescriptor { // ADDED
     std::string id;
     bool connected;
     std::string model;
@@ -85,33 +84,33 @@ struct ProviderDescriptor { // AJOUT
 class ProviderConnections {
 public:
     using OAuthStarter = std::function<std::unique_ptr<ProviderAuthFlow>(const std::string&,
-        std::shared_ptr<std::atomic<bool>>)>; // AJOUT : parcours testables sans service externe
+        std::shared_ptr<std::atomic<bool>>)>; // ADDED: testable flows without external services
     explicit ProviderConnections(std::shared_ptr<AuthStore> auth = std::make_shared<AuthStore>(),
-        std::filesystem::path config = PathResolution::configFile(), OAuthStarter oauthStarter = {}); // AJOUT
+        std::filesystem::path config = PathResolution::configFile(), OAuthStarter oauthStarter = {}); // ADDED
     ProviderSelection selection() const;
     std::string defaultReasoning(const ProviderSelection& selection) const;
     void select(const ProviderSelection& selection);
     std::unique_ptr<Provider> create(const std::string& provider) const;
-    bool hasAuth(const std::string& provider) const; // AJOUT
-    void requireAuth(const std::string& provider) const; // AJOUT
-    std::vector<ProviderDescriptor> list(const ProviderSelection& selection) const; // AJOUT
-    void saveApiKey(const std::string& provider, const std::string& key); // AJOUT
-    void saveOAuth(const std::string& provider, const ProviderCredential& credential); // AJOUT
+    bool hasAuth(const std::string& provider) const; // ADDED
+    void requireAuth(const std::string& provider) const; // ADDED
+    std::vector<ProviderDescriptor> list(const ProviderSelection& selection) const; // ADDED
+    void saveApiKey(const std::string& provider, const std::string& key); // ADDED
+    void saveOAuth(const std::string& provider, const ProviderCredential& credential); // ADDED
     std::unique_ptr<ProviderAuthFlow> startOAuth(const std::string& provider,
-        const std::string& method, std::shared_ptr<std::atomic<bool>> cancelled) const; // AJOUT
+        const std::string& method, std::shared_ptr<std::atomic<bool>> cancelled) const; // ADDED
 private:
-    void saveCredential(const std::string& provider, const ProviderCredential& credential); // AJOUT
-    std::shared_ptr<AuthStore> auth; // déplacé depuis public
+    void saveCredential(const std::string& provider, const ProviderCredential& credential); // ADDED
+    std::shared_ptr<AuthStore> auth; // Moved from public
     std::filesystem::path config;
-    OAuthStarter oauthStarter; // AJOUT
+    OAuthStarter oauthStarter; // ADDED
 };
 ```
 
-### `Integration` — classe modifiée
+### `Integration`: changed class
 
-Fichiers : `daemon/integration/integration.hpp/.cpp`. La lecture signale immédiatement
-les annulations, la boucle reste l'unique écrivain du socket. Les helpers de session
-nomment explicitement sauvegarde, détachement et remise à zéro.
+Files: `daemon/integration/integration.hpp/.cpp`. Reading signals cancellation
+immediately; the loop remains the socket's sole writer. Session helpers explicitly
+name saving, detachment and reset.
 
 ```cpp
 class Integration : public std::enable_shared_from_this<Integration> {
@@ -130,31 +129,31 @@ private:
     asio::awaitable<nlohmann::json> handle(const IntegrationRequest& request);
     void subscribe();
     void schedulePing();
-    void startReader(); // AJOUT
-    void prepareRequest(IntegrationRequest& request); // AJOUT
-    void acknowledgePong(const std::string& id); // AJOUT
-    nlohmann::json makePing(); // AJOUT
-    nlohmann::json runtimeInfo() const; // AJOUT
-    asio::awaitable<nlohmann::json> dispatch(Event& event); // AJOUT
-    asio::awaitable<nlohmann::json> handleRequest(const IntegrationRequest& request); // AJOUT
-    asio::awaitable<nlohmann::json> recordAgentEvent(const AgentEvent& event); // AJOUT
-    asio::awaitable<void> sendReply(nlohmann::json reply); // AJOUT
-    asio::awaitable<nlohmann::json> handleProvider(const IntegrationRequest& request); // AJOUT
-    nlohmann::json handlePermissions(const IntegrationRequest& request); // AJOUT
-    nlohmann::json newSession(const IntegrationRequest& request); // AJOUT
-    nlohmann::json attachSession(const IntegrationRequest& request); // AJOUT
-    asio::awaitable<nlohmann::json> nextReasoningEffort(const IntegrationRequest& request); // AJOUT
-    asio::awaitable<nlohmann::json> sendMessage(const IntegrationRequest& request); // AJOUT
-    SessionInfo makeSessionInfo(const IntegrationRequest& request); // AJOUT
-    asio::awaitable<bool> createSession(SessionInfo info, const std::string& text); // AJOUT
-    asio::awaitable<std::optional<std::string>> generateTitle(const SessionInfo& info, const std::string& text); // AJOUT
+    void startReader(); // ADDED
+    void prepareRequest(IntegrationRequest& request); // ADDED
+    void acknowledgePong(const std::string& id); // ADDED
+    nlohmann::json makePing(); // ADDED
+    nlohmann::json runtimeInfo() const; // ADDED
+    asio::awaitable<nlohmann::json> dispatch(Event& event); // ADDED
+    asio::awaitable<nlohmann::json> handleRequest(const IntegrationRequest& request); // ADDED
+    asio::awaitable<nlohmann::json> recordAgentEvent(const AgentEvent& event); // ADDED
+    asio::awaitable<void> sendReply(nlohmann::json reply); // ADDED
+    asio::awaitable<nlohmann::json> handleProvider(const IntegrationRequest& request); // ADDED
+    nlohmann::json handlePermissions(const IntegrationRequest& request); // ADDED
+    nlohmann::json newSession(const IntegrationRequest& request); // ADDED
+    nlohmann::json attachSession(const IntegrationRequest& request); // ADDED
+    asio::awaitable<nlohmann::json> nextReasoningEffort(const IntegrationRequest& request); // ADDED
+    asio::awaitable<nlohmann::json> sendMessage(const IntegrationRequest& request); // ADDED
+    SessionInfo makeSessionInfo(const IntegrationRequest& request); // ADDED
+    asio::awaitable<bool> createSession(SessionInfo info, const std::string& text); // ADDED
+    asio::awaitable<std::optional<std::string>> generateTitle(const SessionInfo& info, const std::string& text); // ADDED
     nlohmann::json cancelledReply(const IntegrationRequest& request, const SessionInfo& info,
-        std::chrono::steady_clock::time_point startedAt) const; // AJOUT
-    bool consumePreparationCancellation(); // AJOUT
-    void requireIdleSession() const; // AJOUT
-    void saveSession(); // AJOUT
-    void detachSession(); // AJOUT
-    void resetConversationDefaults(); // AJOUT
+        std::chrono::steady_clock::time_point startedAt) const; // ADDED
+    bool consumePreparationCancellation(); // ADDED
+    void requireIdleSession() const; // ADDED
+    void saveSession(); // ADDED
+    void detachSession(); // ADDED
+    void resetConversationDefaults(); // ADDED
 
     asio::io_context& io;
     ConnectionSocket connection;
@@ -172,14 +171,14 @@ private:
     std::string expectedPong;
     bool closing = false;
     std::shared_ptr<ProviderConnections> providers;
-    ProviderConnection providerConnection; // AJOUT, remplace l'état OAuth et la sélection dispersés
+    ProviderConnection providerConnection; // ADDED: replaces scattered OAuth state and selection
 };
 ```
 
-### `OpenAIProvider` — classe modifiée
+### `OpenAIProvider`: changed class
 
-Fichiers : `agent-runtime/providers/openai_provider.hpp/.cpp`. Les étapes du
-transport sont nommées ; `generate()` ne déroule plus leur implémentation.
+Files: `agent-runtime/providers/openai_provider.hpp/.cpp`. Transport stages are
+named; `generate()` no longer contains their implementation.
 
 ```cpp
 class OpenAIProvider : public Provider {
@@ -194,30 +193,36 @@ public:
     std::optional<std::uint64_t> getUsedContext(const nlohmann::json& response) const override;
 private:
     nlohmann::json prepareRequest(const nlohmann::json& input, const std::string& model,
-        const std::vector<ToolDefinition>& tools, const std::string& reasoningEffort, bool codex); // AJOUT
-    std::string postRequest(const nlohmann::json& request, const ProviderAuthorization& authorization) const; // AJOUT
-    static void prepareCodexInstructions(nlohmann::json& request); // AJOUT
-    static nlohmann::json readResponse(const std::string& output, bool codex); // AJOUT
+        const std::vector<ToolDefinition>& tools, const std::string& reasoningEffort, bool codex); // ADDED
+    std::string postRequest(const nlohmann::json& request, const ProviderAuthorization& authorization) const; // ADDED
+    static void prepareCodexInstructions(nlohmann::json& request); // ADDED
+    static nlohmann::json readResponse(const std::string& output, bool codex); // ADDED
     std::shared_ptr<ProviderAuth> auth;
     std::string apiEndpoint;
     std::string codexEndpoint;
 };
 ```
 
-### Modules internes
+### Internal modules
 
-- `transport/await_future.hpp` : `template<class Future> asio::awaitable<void> awaitFuture(Future& future)` ; attente non bloquante commune, sans consommer le résultat ni abandonner le worker.
-- `openai_oauth.cpp` : séparer démarrage navigateur/appareil, écoute locale, lecture HTTP, validation du callback, attente du code appareil, puis échange du code. Les fonctions publiques restent stables ; le type de résultat devient `ProviderAuthFlow`.
-- `OpenAIProvider` : séparer préparation de la requête, instructions Codex, transport HTTP et lecture de la réponse ; `generate()` devient l'enchaînement de ces opérations.
+- `transport/await_future.hpp`: `template<class Future> asio::awaitable<void> awaitFuture(Future& future)`;
+  shared nonblocking waiting, without consuming the result or abandoning the worker.
+- `openai_oauth.cpp`: separate browser/device startup, local listening, HTTP
+  reading, callback validation, waiting for the device code, and code exchange.
+  Public functions remain stable; the result type becomes `ProviderAuthFlow`.
+- `OpenAIProvider`: separate request preparation, Codex instructions, HTTP transport
+  and response reading; `generate()` becomes their orchestration.
 
-## Ordre de réalisation et validation
+## Implementation order and validation
 
-1. Extraire l'attente des futures et les commandes de connexion typées.
-2. Encapsuler les credentials dans `ProviderConnections`, déplacer le parcours vers `ProviderConnection`.
-3. Décomposer `Integration` en orchestration lisible, en conservant l'ordre sauvegarde/notification et l'annulation immédiate.
-4. Décomposer les longues fonctions OAuth et du transport OpenAI par intention.
-5. Tester API/OAuth, annulation avant démarrage et pendant attente, sélection échouée, reprise et renouvellement ; exécuter CTest, les tests TUI et le packaging exclusivement sous `build-ai/`.
+1. Extract future waiting and typed connection commands.
+2. Encapsulate credentials in `ProviderConnections`; move the flow to `ProviderConnection`.
+3. Break `Integration` into readable orchestration, preserving save/notification
+   ordering and immediate cancellation.
+4. Split long OAuth and OpenAI transport functions by intent.
+5. Test API/OAuth, cancellation before startup and during waiting, failed selection,
+   resume and refresh; run CTest, TUI tests and packaging only under `build-ai/`.
 
-Le risque principal est la durée de vie des workers : annuler ne signifie pas
-détruire une future encore en cours. La fermeture doit attendre leur terminaison
-sans bloquer la boucle Asio. Les tests n'utilisent aucun credential réel.
+The main risk is worker lifetime: cancellation does not mean destroying a future
+that is still running. Shutdown must await termination without blocking the Asio
+loop. Tests use no real credentials.

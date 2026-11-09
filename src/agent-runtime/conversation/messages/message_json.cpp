@@ -40,6 +40,7 @@ void to_json(nlohmann::json& json, const Message& message) {
     if (message.modelCall) json["model_call"] = *message.modelCall;
     if (message.recap) json["recap"] = true;
     if (message.objectivePlan) json["objective_plan"] = true;
+    if (message.objectiveCompleted) json["objective_completed"] = true;
     if (message.implementationPlan) json["implementation_plan"] = *message.implementationPlan;
     if (message.objectiveStack) json["objective_stack"] = *message.objectiveStack;
     if (message.userSkill) json["user_skill"] = *message.userSkill;
@@ -92,6 +93,9 @@ void from_json(const nlohmann::json& json, Message& message) {
     json.at("id").get_to(result.id);
     result.recap = json.value("recap", false);
     result.objectivePlan = json.value("objective_plan", false);
+    result.objectiveCompleted = json.value("objective_completed", false);
+    if (result.objectiveCompleted && json.at("role") != "system")
+        throw std::invalid_argument("Objective completion requires a system message");
     if (json.contains("implementation_plan")) {
         if (json.at("role") != "assistant" || result.objectivePlan)
             throw std::invalid_argument("An implementation plan requires a distinct assistant message");

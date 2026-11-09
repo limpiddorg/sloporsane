@@ -71,6 +71,8 @@ struct Message {
     // User text presented to the model instead of the original command in content.
     std::optional<std::string> providerText;
     std::optional<ImplementationPlan> implementationPlan;
+    // Harness boundary: keep historical plans, but stop carrying the objective forward.
+    bool objectiveCompleted = false;
 };
 
 #endif // SOS_MESSAGE_HPP

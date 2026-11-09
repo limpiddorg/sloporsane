@@ -44,6 +44,7 @@ from .chat_collapsible import ChatCollapsible
 from .mode_button import ModeButton
 from .response_markdown import ResponseMarkdown
 from .objective_plan import ObjectivePlan
+from .objective_drawer import ObjectivePlanDrawer
 from .objective_workspace import ObjectiveWorkspace, ImplementationPlanWorkspace
 from .implementation import ImplementationConversations
 from .discussion_preview import DiscussionPreview
@@ -644,6 +645,8 @@ class SosApp(App[None]):
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+        for drawer in self.query(ObjectivePlanDrawer):
+            drawer.sync()
         self.query_one(ObjectiveWorkspace).sync()
         self.query_one(ImplementationPlanWorkspace).sync()
         indicator = self.query_one("#mode-indicator", Static)

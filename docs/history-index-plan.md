@@ -1,8 +1,8 @@
-# Stockage des sessions et historique paginé
+# Session storage and paginated history
 
-## Architecture retenue
+## Chosen architecture
 
-Chaque session possède deux fichiers principaux :
+Each session has two main files:
 
 ```text
 <session-id>/
@@ -10,105 +10,98 @@ Chaque session possède deux fichiers principaux :
   info.json
 ```
 
-SQLite est la source de vérité, pas un index supprimable. `info.json` est un
-résumé lisible et recréable des métadonnées (dont mode, modèle et réflexion).
-Les nouvelles sessions ne créent ni `messages.jsonl` ni `messages.index.jsonl`.
-SQLite 3.50.4 est compilé statiquement dans le daemon depuis l'amalgamation
-publique officielle, vérifiée par SHA-256. Son code est dans le domaine public :
-https://www.sqlite.org/copyright.html. Aucun exécutable `sqlite3` n'est requis.
+SQLite is the source of truth, not a disposable index. `info.json` is a readable,
+rebuildable metadata summary, including mode, model and reasoning. New sessions
+create neither `messages.jsonl` nor `messages.index.jsonl`. SQLite 3.50.4 is
+statically compiled into the daemon from the official public amalgamation,
+verified by SHA-256. Its code is in the public domain:
+https://www.sqlite.org/copyright.html. No `sqlite3` executable is required.
 
-## État livré
+## Delivered behavior
 
-`SessionDatabase` possède la connexion, les requêtes préparées et les transactions.
-`SessionJournal` conserve son nom et son API de messages, mais utilise uniquement
-SQLite. Schéma courant 6, versionné par `user_version` et identifié par
-`application_id`. Les tables actuelles contiennent les messages par position et
-identifiant unique, leurs résumés séparés des corps complets et les métadonnées
-nécessaires à la reprise. Un index rôle/position permet l'accès direct au dernier
-message utilisateur. Les données de replay provider restent conservées.
+`SessionDatabase` owns the connection, prepared statements and transactions.
+`SessionJournal` retains its name and message API but uses SQLite exclusively.
+The current schema is 6, versioned through `user_version` and identified by
+`application_id`. Tables contain messages by position and unique identifier,
+lightweight summaries separate from full bodies, and resume metadata. A
+role/position index provides direct access to the last user message. Provider
+replay data is preserved.
 
-`SessionRecoveryIndex` conserve les appels en attente, identifiants
-d'appels résolus, actions refusées, audit des approbations et dernier état par
-action exacte. L'index est mis à jour dans la transaction du message source.
-Le registry ne parcourt plus les résumés pour réparer une exécution interrompue.
-Les permissions lisent directement les actions enregistrées, sans décoder les
-sorties d'outils. Les refus équivalents partagent le dernier état d'approbation ;
-le rapport du prochain tour conserve toutes les bascules chronologiques.
-Les lectures restent proportionnelles aux appels en attente ou aux états de
-permission retournés, pas à tous les messages. La réponse d'états d'approbation
-retourne encore l'ensemble des refus concernés, sans pagination.
+`SessionRecoveryIndex` retains pending calls, resolved call IDs, refused actions,
+approval audits and the latest state of each exact action. It is updated in the
+source message's transaction. The registry no longer scans summaries to repair
+interrupted execution. Permissions read recorded actions directly, without
+decoding tool output. Equivalent refusals share the latest approval state; the
+next turn's report retains all chronological toggles. Reads scale with pending
+calls or returned permission states, not total messages. Approval-state responses
+still return every relevant refusal, without pagination.
 
-Les messages d'un événement et ses métadonnées sont enregistrés dans une même
-transaction. Le checkpoint de compaction et sa frontière de contexte le sont
-également. Un échec annule toute la transaction, sans tronquer de fichier.
-Le cache SQLite est configuré à environ 4 Mio par connexion ; cela ne borne pas
-encore la mémoire des objets d'affichage de l'application.
+An event's messages and metadata are saved in the same transaction, as are a
+compaction checkpoint and its context boundary. Failure rolls back the whole
+transaction without truncating a file. SQLite's cache is configured to about
+4 MiB per connection; this does not yet bound the application's display objects.
 
-`info.json` est publié par remplacement atomique à la création, au début d'un tour,
-à sa fin, lors des changements de réglages et des sauvegardes explicites. Les
-événements intermédiaires ne le réécrivent pas systématiquement. Une erreur de
-publication est signalée mais ne transforme pas un commit réussi en échec.
-La reprise lit toujours les métadonnées SQLite. La liste utilise le cache et le
-recrée depuis SQLite s'il est absent ou invalide ; un cache valide mais ancien peut
-rester périmé jusqu'à la prochaine ouverture de cette session.
+`info.json` is published by atomic replacement at creation, turn start/end,
+setting changes and explicit saves. Intermediate events do not systematically
+rewrite it. Publication errors are reported but do not turn a successful commit
+into a failure. Resume always reads SQLite metadata. The session list uses the
+cache and rebuilds it from SQLite if absent or invalid; a valid but old cache may
+remain stale until that session is next opened.
 
-## Formats et durabilité
+## Formats and durability
 
-Seule une base neuve (version 0) ou le schéma courant 6 est accepté. Les anciens
-schémas internes sont refusés sans migration ni remplacement de leurs messages.
-Les fichiers JSONL et anciennes métadonnées restent intacts et ne sont jamais
-importés ; `info.json` ne peut pas initialiser une base. Une base corrompue est
-refusée, jamais remplacée depuis un autre format.
+Only a new database (version 0) or current schema 6 is accepted. Older internal
+schemas are rejected without migration or message replacement. JSONL files and
+old metadata remain untouched and are never imported; `info.json` cannot
+initialize a database. A corrupt database is rejected, never replaced from
+another format.
 
-Les index de recovery et d'affichage sont créés avec la base neuve et mis à jour
-dans les transactions des messages. À l'ouverture, aucun ancien agrégat n'est
-reconstruit et aucun corps n'est chargé pour compléter un nom de skill absent.
-Un audit d'approbation sans refus IA qualifié antérieur est rejeté, jamais
-transformé en autorisation.
+Recovery and display indexes are created with a new database and updated in
+message transactions. Opening a database neither rebuilds old aggregates nor
+loads bodies to fill in a missing skill name. An approval audit without a prior
+qualifying AI refusal is rejected, never converted into authorization.
 
-Le mode WAL et `synchronous=FULL` demandent à SQLite de synchroniser chaque commit
-sur le stockage. La garantie dépend aussi du système de fichiers et du matériel.
-`session.sqlite-wal` et `session.sqlite-shm` peuvent accompagner la base ouverte.
-Ne pas les supprimer ni copier seulement la base pendant une exécution : utiliser
-l'API de sauvegarde SQLite ou fermer proprement le daemon avant de copier le dossier.
-Un seul daemon par dossier de sessions reste requis.
+WAL mode and `synchronous=FULL` ask SQLite to synchronize every commit to storage.
+The guarantee also depends on the filesystem and hardware. An open database may
+have accompanying `session.sqlite-wal` and `session.sqlite-shm` files. Do not
+delete them or copy only the database during execution: use SQLite's backup API,
+or shut down the daemon cleanly before copying the directory. Only one daemon
+per sessions directory is supported.
 
-## Pagination restante
+## Remaining pagination
 
-`SessionHistoryService` consulte maintenant `SessionHistoryIndex` dans SQLite.
-Il n'appelle plus `SessionHistoryView::update()` et ne charge plus tous les
-résumés. Les pages utilisent des ancrages indexés et des plages de positions,
-sans OFFSET parcourant les anciennes lignes. Une Activity repliée lit son résumé
-préagrégé, sans charger ses éléments. Le rendu réutilise les fonctions de
-`SessionHistoryView`, dont l'ancien projecteur sert aussi d'oracle aux tests.
+`SessionHistoryService` queries SQLite's `SessionHistoryIndex`. It no longer
+calls `SessionHistoryView::update()` or loads all summaries. Pages use indexed
+anchors and position ranges, not OFFSET scans over older rows. A collapsed
+Activity reads its precomputed aggregate without loading its items. Rendering
+reuses `SessionHistoryView` functions; the old projector also serves as a test
+oracle.
 
-La projection est mise à jour dans la transaction du message, y compris lorsqu'un
-résultat tardif complète une ancienne Activity. Les durées, compteurs modèle et
-métadonnées finales ne nécessitent pas de reconstruire les groupes à l'ouverture.
-Les sélections de pages restent des positions stables, pas des snapshots : les
-groupes peuvent être actualisés entre sélection et lecture durant l'exécution.
+The projection is updated in the message transaction, including late results
+that complete an older Activity. Durations, model counters and final metadata
+require no group reconstruction on opening. Page selections are stable positions,
+not snapshots: groups may change between selection and reading during execution.
 
-Les contenus individuels sont encore lus en entier. Les Activities ouvertes,
-dont la dernière préchargée comme auparavant, chargent encore tous leurs éléments.
-Les lectures de détails récupèrent les résumés des messages sources par position ;
-un message comportant énormément de parties reste donc coûteux. Les pages sont
-bornées en messages visibles, pas encore en octets ni en éléments auxiliaires.
+Individual contents are still read in full. Expanded Activities, including the
+preloaded last one, still load all their items. Detail reads retrieve source
+message summaries by position, so a message with many parts remains expensive.
+Pages are bounded by visible messages, not yet by bytes or auxiliary items.
 
-Le contrat cible reste une ouverture et des pages bornées en éléments et en octets :
+The target remains opening and pages bounded by both items and bytes:
 
-1. Remplacer le scan des checkpoints lors de la préparation du contexte par des
-   requêtes dédiées. Les scans d'approbations et d'appels interrompus sont retirés.
-2. Paginer les éléments d'Activity et séparer les gros contenus en portions, avec
-   budgets explicites dans le protocole et la TUI.
-3. Étendre les mesures de budgets au chemin des gros contenus et Activities
-   ouvertes. Les tests comparent déjà la même dernière page après 30 et 3 000
-   anciens messages et vérifient une Activity repliée de 100 000 éléments.
+1. Replace checkpoint scans during context preparation with dedicated queries.
+   Approval and interrupted-call scans have already been removed.
+2. Paginate Activity items and split large contents into chunks, with explicit
+   budgets in the protocol and TUI.
+3. Extend budget measurements to large contents and expanded Activities. Tests
+   already compare the same last page after 30 and 3,000 older messages and check
+   a collapsed Activity with 100,000 items.
 
-`bytesRead()` mesure les octets des corps retournés par le lecteur, pas les entrées/sorties physiques
-totales de SQLite. `summaryRowsRead()` compte les résumés décodés. Les tests de
-reprise auxiliaire vérifient que ces deux compteurs restent à zéro, même avec
-plusieurs milliers de messages et de grosses sorties refusées.
-Les tests d'équivalence comparent pages, résumés et détails à l'ancien projecteur
-après chaque ajout et réouverture. Ils vérifient aussi rollback, annulation de
-création et rejet non destructif des anciens formats. Ces tests ne sont pas une mesure des lectures physiques ni une garantie
-de mémoire bornée pour les contenus et Activities ouverts, restant à paginer.
+`bytesRead()` measures body bytes returned by the reader, not total physical
+SQLite I/O. `summaryRowsRead()` counts decoded summaries. Auxiliary recovery tests
+check that both remain zero even with thousands of messages and large refused
+outputs. Equivalence tests compare pages, aggregates and details against the old
+projector after every append and reopen. They also check rollback, canceled
+creation and nondestructive rejection of older formats. These tests neither
+measure physical reads nor guarantee bounded memory for expanded contents and
+Activities, which still need pagination.

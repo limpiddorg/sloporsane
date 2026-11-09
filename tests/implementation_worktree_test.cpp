@@ -404,6 +404,91 @@ TEST_F(ImplementationWorktreeTest, ResumesJournaledPartialImportWithoutReapplyin
     reopened.close();
 }
 
+TEST_F(ImplementationWorktreeTest, EmptyRepositoryStartsImportsAndClosesWithoutCreatingAUserCommit) {
+    fs::remove_all(repo);
+    fs::create_directories(repo);
+    git({"init", "--template="});
+    const auto originalHead = read(repo / ".git/HEAD");
+    ImplementationWorktree work(session);
+    const auto checkout = work.start(repo, "empty-repository");
+    EXPECT_NE(checkout, repo);
+    EXPECT_FALSE(fs::exists(repo / ".git/index"));
+    EXPECT_TRUE(git({"for-each-ref", "--format=%(refname)", "refs/heads/"}).starts_with("refs/heads/sos/"));
+    EXPECT_EQ(core::runProcess("git", {"rev-parse", "--verify", "HEAD"}, repo).exitCode, 128);
+    EXPECT_EQ(core::runProcess("git", {"ls-tree", "--name-only", "HEAD"}, checkout).output, "");
+    const auto snapshot = step(checkout, [&] { write(checkout / "snake.py", "print('snake')\n"); });
+    work.seal(0, snapshot);
+    EXPECT_FALSE(fs::exists(repo / "snake.py"));
+    ImplementationWorktree reopened(session);
+    EXPECT_EQ(reopened.start(repo, "empty-repository"), checkout);
+    reopened.import(0, snapshot);
+    EXPECT_EQ(read(repo / "snake.py"), "print('snake')\n");
+    EXPECT_EQ(read(repo / ".git/HEAD"), originalHead);
+    EXPECT_FALSE(fs::exists(repo / ".git/index"));
+    reopened.close();
+    EXPECT_FALSE(fs::exists(checkout));
+    EXPECT_EQ(git({"for-each-ref", "--format=%(refname)", "refs/heads/"}), "");
+    EXPECT_FALSE(GitSnapshot::archive(checkout).diffs({snapshot.before}, {snapshot.after}).empty());
+}
+
+TEST_F(ImplementationWorktreeTest, UnbornRepositoryPreservesStagedAndUntrackedFilesFromSubdirectory) {
+    fs::remove_all(repo / ".git");
+    git({"init", "--template="});
+    git({"add", "file"});
+    const auto index = read(repo / ".git/index");
+    const auto originalHead = read(repo / ".git/HEAD");
+    write(repo / "file", "unstaged content\n");
+    write(repo / "app/untracked", "local content\n");
+    write(repo / "ignored/cache", "ignored content\n");
+    ImplementationWorktree work(session);
+    const auto execution = work.start(repo / "app", "unborn-dirty");
+    const auto checkout = work.executionRoot();
+    EXPECT_EQ(execution, checkout / "app");
+    EXPECT_EQ(read(checkout / "file"), "unstaged content\n");
+    EXPECT_EQ(read(execution / "untracked"), "local content\n");
+    EXPECT_FALSE(fs::exists(checkout / "ignored/cache"));
+    const auto snapshot = step(checkout, [&] { write(execution / "created", "implementation\n"); });
+    work.seal(0, snapshot);
+    work.import(0, snapshot);
+    work.close();
+    EXPECT_EQ(read(repo / "app/created"), "implementation\n");
+    EXPECT_EQ(read(repo / "file"), "unstaged content\n");
+    EXPECT_EQ(read(repo / "ignored/cache"), "ignored content\n");
+    EXPECT_EQ(read(repo / ".git/index"), index);
+    EXPECT_EQ(read(repo / ".git/HEAD"), originalHead);
+    EXPECT_EQ(git({"for-each-ref", "--format=%(refname)", "refs/heads/"}), "");
+}
+
+TEST_F(ImplementationWorktreeTest, RevisionLookupFailureDoesNotStartAnEmptyCheckout) {
+    ImplementationWorktree work(session, [](const std::vector<std::string>& args,
+        const fs::path& cwd, const core::ProcessOptions& options) {
+        if (std::find(args.begin(), args.end(), "HEAD^{commit}") != args.end()) {
+            core::ProcessResult failure;
+            failure.exitCode = 128;
+            failure.error = "Cannot read repository";
+            return failure;
+        }
+        return core::runProcess("/usr/bin/env", args, cwd, {}, {}, options);
+    });
+    EXPECT_THROW(work.start(repo, "lookup-failure"), std::runtime_error);
+    EXPECT_FALSE(work.exists());
+    EXPECT_FALSE(fs::exists(PathResolution::worktreesDirectory() / "lookup-failure"));
+}
+
+TEST_F(ImplementationWorktreeTest, EmptyPlainDirectoryStartsAndImportsWithoutCreatingUserGitMetadata) {
+    makePlainDirectory();
+    fs::remove_all(repo);
+    fs::create_directories(repo);
+    ImplementationWorktree work(session);
+    const auto checkout = work.start(repo, "empty-plain");
+    const auto snapshot = step(checkout, [&] { write(checkout / "created", "implementation\n"); });
+    work.seal(0, snapshot);
+    work.import(0, snapshot);
+    work.close();
+    EXPECT_EQ(read(repo / "created"), "implementation\n");
+    EXPECT_FALSE(fs::exists(repo / ".git"));
+}
+
 TEST_F(ImplementationWorktreeTest, PlainDirectoryUsesPrivateGitRespectsExclusionsAndImportsSelectedStep) {
     makePlainDirectory();
     write(repo / ".gitignore", "ignored/\n!.sos/\n!.sos/**\n");
