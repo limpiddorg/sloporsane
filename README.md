@@ -1,6 +1,12 @@
-# Sloporsane (SOS)
+### Sloporsane (SOS)
 
-An AI coding harness designed to make AI-generated code easier to review.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/sos-banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/sos-banner-light.svg">
+  <img alt="sos — AI code, human steering" src="docs/images/sos-banner-light.svg" width="100%">
+</picture>
+
+An AI coding harness designed to make AI-generated code easier to understand.
 
 ```sh
 curl -fsSL https://limpidd.com/install | bash
