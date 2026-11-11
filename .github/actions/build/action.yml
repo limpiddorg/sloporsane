@@ -48,7 +48,7 @@ runs:
         cmake -S . -B build-ai -G Ninja -DCMAKE_BUILD_TYPE=Release \
           -DSOS_VERSION="$SOS_VERSION" \
           -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-          -DSOS_BUILD_TEXTUAL=ON -DSOS_BUILD_FTXUI=OFF -DBUILD_TESTING=ON \
+          -DSOS_BUILD_TEXTUAL=ON -DBUILD_TESTING=ON \
           -DSOS_TUI_BIN_DIR="$GITHUB_WORKSPACE/build-ai/install/bin" \
           -DSOS_TUI_INSTALL_DIR="$GITHUB_WORKSPACE/build-ai/install/app"
     - name: Compile

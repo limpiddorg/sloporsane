@@ -21,11 +21,7 @@ is written in English.
 
 ## Default integration
 
-**By default, TUI changes only concern the Python/Textual version in
-`integrations/tui/`.** Only change the C++/FTXUI integration in
-`integrations/ftxui/`, its tests or its build when the author explicitly requests
-it for that version. A Textual fix or enhancement does not authorize porting it
-automatically to FTXUI, even to maintain parity between the two integrations.
+TUI changes concern the Python/Textual integration in `integrations/tui/`.
 
 ## C++
 
@@ -111,18 +107,8 @@ To run the TUI locally from `integrations/tui/`: use `uv run tui`, after a
 `build-tui` build, which also places a development copy of `sosd` there.
 The installed `sos` command preserves the directory it was invoked from.
 
-The native `integrations/ftxui/` integration uses C++23 and FTXUI 6.1.9, without
-a Python interpreter. `SOS_BUILD_FTXUI` enables its build (default `ON`);
-`SOS_BUILD_TEXTUAL=OFF` completely disables Python packaging configuration
-and its dependency on `uv`. The `build-ftxui` target produces `bin/sos-ftxui`
-and `bin/sosd`. The explicit `install-ftxui` target installs hash-separated
-versions in `$XDG_DATA_HOME/sos/ftxui/`, then a `~/.local/bin/sos-ftxui` link.
-For agent verification, also configure
-`-DSOS_FTXUI_BIN_DIR="$PWD/build-ai/ftxui/bin"` and
-`-DSOS_FTXUI_INSTALL_DIR="$PWD/build-ai/ftxui/installed"`.
-The `FtxuiE2E.*` tests are themselves written in C++ and drive the real executable
-in a pseudo-terminal, using either a fake protocol daemon or an isolated real `sosd`.
-The daemon's native system libraries are still required at installation time.
+`SOS_BUILD_TEXTUAL=OFF` disables Python packaging configuration and its dependency
+on `uv`, allowing a native daemon-only build.
 
 Always configure and build from the root `CMakeLists.txt`.
 **The agent uses only `build-ai/` for verification.

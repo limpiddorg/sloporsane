@@ -2,9 +2,9 @@
 
 Local measurements in the `optimize-tests` worktree, on macOS with Python 3.14.8,
 Textual 8.2.8 and dependencies from `uv.lock`. The native build is Release.
-Dependency installation, compilation, packaging and FTXUI are excluded from the
-timings. Python and C++ suites were measured separately, without CPU contention
-between them.
+Dependency installation, compilation and packaging are excluded from the
+runtime/daemon and Textual timings. Python and C++ suites were measured separately,
+without CPU contention between them.
 
 ## Results
 

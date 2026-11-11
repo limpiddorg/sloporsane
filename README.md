@@ -28,6 +28,10 @@ it's for people who don't want to ship code they don't understand.
 
 ## How it works
 
+[![Watch the Sane workflow walkthrough](docs/images/sane-implementation.png)](https://www.limpidd.com/video.mp4)
+
+[Watch the video](https://www.limpidd.com/video.mp4) · [Video file in this repository](docs/sane-walkthrough.mp4)
+
 SOS has two modes:
 
 - **Slop** gives you the familiar chat-like experience: describe what you want and let the agent work.

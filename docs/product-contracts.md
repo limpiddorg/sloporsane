@@ -2,7 +2,7 @@
 
 These requirements supplement [AGENTS.md](../AGENTS.md). Read the relevant
 sections before making changes; protocol details remain in the linked documents.
-TUI interactions here target Python/Textual, not mandatory FTXUI parity.
+TUI interactions here target Python/Textual (`integrations/tui/`).
 
 ## Language
 

@@ -9,9 +9,7 @@
   These contracts are requirements, not suggestions.
 - Use only `build-ai/` for verification builds, tests and installations.
   `build/` is reserved for the human.
-- By default, a TUI request targets Python/Textual (`integrations/tui/`). Only change
-  FTXUI (`integrations/ftxui/`), its tests or its build when explicitly requested;
-  do not automatically port Textual changes to it.
+- TUI requests target Python/Textual (`integrations/tui/`).
 
 ## Collaboration
 
