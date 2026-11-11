@@ -203,6 +203,7 @@ class PermissionsScreenTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_api_picker_precedes_fields_and_preserves_legacy_destination(self):
         child = await self.change_model()
+        await self.pilot.pause()  # Measure the picker after its first layout.
         listing = child.query_one(OptionList)
         self.assertGreaterEqual(listing.content_region.height, 2)
         self.assertEqual(listing.option_count, 2)
