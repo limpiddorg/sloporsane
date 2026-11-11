@@ -116,6 +116,7 @@ struct ProviderState {
 class TestProvider : public Provider {
 public:
     explicit TestProvider(std::shared_ptr<ProviderState> state) : state(std::move(state)) {}
+    bool cancellationRequested() const { return cancellationCheck && cancellationCheck(); }
     void setSessionId(const std::string& id) override { state->sessionId = id; }
     ProviderFormat getFormat() const override { return ProviderFormat::OPENAI_RESPONSES; }
     std::optional<std::uint64_t> getContextLimit(const std::string&) override { return state->contextLimit; }
@@ -5294,7 +5295,13 @@ TEST_F(SessionTest, DisconnectCancelsAndDrainsBeforeSessionIsReleased) {
     provider->release = release.get_future().share();
     auto entered = provider->entered.get_future();
     asio::io_context io;
-    SessionRegistry registry(directory / "sessions", factory());
+    TestProvider* activeProvider = nullptr;
+    SessionRegistry registry(directory / "sessions", [&](const SessionInfo& info) {
+        auto instance = std::make_unique<TestProvider>(provider);
+        activeProvider = instance.get();
+        return std::make_unique<Agent>(std::move(instance), info.model,
+            ToolRegistry{}, ToolContext{}, info.reasoning);
+    });
     ServerSocket server(io, directory / "server.sock");
     server.listen();
     asio::local::stream_protocol::socket socket(io);
@@ -5320,8 +5327,16 @@ TEST_F(SessionTest, DisconnectCancelsAndDrainsBeforeSessionIsReleased) {
         }
         client.close();
     }, asio::use_future);
-    io.run_for(std::chrono::milliseconds(50));
-    EXPECT_EQ(entered.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    // Preparation and disconnect detection both need the event loop to keep running.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        io.run_for(std::chrono::milliseconds(5));
+        if (entered.wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
+            activeProvider->cancellationRequested()) break;
+    }
+    const bool started = entered.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    EXPECT_TRUE(started);
+    if (started) EXPECT_TRUE(activeProvider->cancellationRequested());
     EXPECT_EQ(run.wait_for(std::chrono::seconds(0)), std::future_status::timeout);
     if (!id.empty()) EXPECT_THROW(registry.load(id), std::logic_error);
     release.set_value();

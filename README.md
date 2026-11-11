@@ -1,10 +1,13 @@
-# SOS – Sloporsane
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/sos-banner-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/images/sos-banner-light.svg">
   <img alt="sos — AI code, human steering" src="docs/images/sos-banner-light.svg" width="100%">
 </picture>
+
+[![CI](https://github.com/limpiddorg/sloporsane/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/limpiddorg/sloporsane/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/release/limpiddorg/sloporsane?label=version)](https://github.com/limpiddorg/sloporsane/releases/latest)
+[![Interface: TUI](https://img.shields.io/badge/interface-TUI-05b07d)](#how-it-works)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 An AI coding harness designed to make AI-generated code easier to understand.
 
@@ -28,9 +31,19 @@ it's for people who don't want to ship code they don't understand.
 
 ## How it works
 
-[![Watch the Sane workflow walkthrough](docs/images/sane-implementation.png)](https://www.limpidd.com/video.mp4)
-
-[Watch the video](https://www.limpidd.com/video.mp4) · [Video file in this repository](docs/sane-walkthrough.mp4)
+<table>
+  <tr>
+    <th align="left">Video demo: the Sane workflow</th>
+  </tr>
+  <tr>
+    <td>
+      <a href="https://www.limpidd.com/video.mp4"><img src="docs/images/sane-implementation.png" alt="Video preview: watch the Sane workflow walkthrough" width="100%"></a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><a href="https://www.limpidd.com/video.mp4"><strong>Watch the video</strong></a></td>
+  </tr>
+</table>
 
 SOS has two modes:
 
