@@ -1,0 +1,61 @@
+-- Launched by smoke.py with isolated XDG paths and a local provider fixture.
+vim.opt.runtimepath:prepend(vim.fn.getcwd() .. '/integrations/neovim')
+local ok, err = xpcall(function()
+   vim.cmd('runtime plugin/sos.lua')
+   local sos = require('sos')
+   sos.setup({socket=vim.env.SOS_TEST_SOCKET,auto_start=false,timeout_ms=5000,
+     workspace=vim.env.SOS_TEST_WORKSPACE})
+   assert(vim.fn.exists(':SosConnect')==2 and vim.fn.exists(':SosSend')==2)
+   local client = sos.client()
+  local events = {}
+  client.on_event = function(event) table.insert(events,event) end
+   local session = sos.session()
+   local panel = sos.panel()
+  local function wait(predicate)
+    assert(vim.wait(15000,predicate,10), 'Real-daemon timeout: ' .. vim.inspect(events))
+  end
+   vim.cmd('SosConnect')
+  wait(function() return session.configured end)
+  local function command(frame, terminal)
+    local done, response, failure
+    assert(session:request(frame,terminal,function(event,error) response,failure,done=event,error,true end))
+    wait(function() return done end)
+    assert(response,failure)
+    return response
+  end
+  local provider = command({type='provider.create',name='Neovim smoke',base_url=vim.env.SOS_TEST_URL},'provider.listed').created_provider
+  command({type='provider.select',provider=provider},'provider.selected')
+  command({type='model.list'},'model.listed')
+  command({type='model.select',provider=provider,model='local-model',context_limit=65536},'model.selected')
+   vim.cmd('SosToggle')
+   session:set_draft('Hello\nfrom Neovim'); session:changed(); vim.cmd('SosSend')
+  wait(function() return session.current.id and not session.current.busy and not session.current.pending end)
+  local id = session.current.id
+  local output = table.concat(vim.api.nvim_buf_get_lines(session.current.view.transcript,0,-1,false),'\n')
+  assert(output:find('Local answer',1,true), output)
+  session:set_draft('Retained session draft')
+  session:new_session()
+  wait(function() return session.current.id == nil and not session.switching end)
+  assert(session.saved[id].draft == 'Retained session draft')
+  session:attach(id)
+  wait(function() return session.current.id == id and not session.switching end)
+  assert(session.current.draft == 'Retained session draft' and #session.current.records > 0)
+  session:latest()
+  wait(function() return not session:history().loading end)
+  assert(session:history().page.first and #session.current.records > 0)
+  session:toggle_mode()
+  wait(function() return session.current.mode == 'slop' end)
+  local keeper = require('sos.transport').new({socket=vim.env.SOS_TEST_SOCKET,auto_start=false,timeout_ms=5000})
+  keeper:connect()
+  wait(function() return keeper.state == 'ready' end)
+  client:close()
+  client:reconnect()
+  wait(function() return client.synchronized and not client.recovering end)
+  assert(session.current.id == id and session.current.draft == 'Retained session draft')
+  panel:hide()
+  client:close()
+  keeper:close()
+end,debug.traceback)
+if not ok then io.stderr:write(err .. '\n'); vim.cmd('cquit 1') end
+print('Real-daemon native session smoke passed')
+vim.cmd('qa!')

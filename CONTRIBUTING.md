@@ -108,7 +108,14 @@ To run the TUI locally from `integrations/tui/`: use `uv run tui`, after a
 The installed `sos` command preserves the directory it was invoked from.
 
 `SOS_BUILD_TEXTUAL=OFF` disables Python packaging configuration and its dependency
-on `uv`, allowing a native daemon-only build.
+on `uv`. The default build also installs the native Neovim plugin when Neovim
+0.10+ is on PATH, independently of Textual. Use `SOS_INSTALL_NEOVIM=OFF` for a
+daemon-only build. The plugin uses Neovim's data directory under
+`site/pack/sos/start/sos`, without changing editor configuration. Override
+`SOS_NEOVIM_INSTALL_DIR` to choose another destination. Agent verification must
+set it beneath `build-ai/`, for example
+`-DSOS_NEOVIM_INSTALL_DIR="$PWD/build-ai/nvim-data/site/pack/sos/start/sos"`.
+See `integrations/neovim/README.md` for usage.
 
 Always configure and build from the root `CMakeLists.txt`.
 **The agent uses only `build-ai/` for verification.
@@ -131,7 +138,8 @@ From the repository root:
 ```sh
 cmake -S . -B build-ai \
   -DSOS_TUI_BIN_DIR="$PWD/build-ai/tui/bin" \
-  -DSOS_TUI_INSTALL_DIR="$PWD/build-ai/tui/installed"
+  -DSOS_TUI_INSTALL_DIR="$PWD/build-ai/tui/installed" \
+  -DSOS_NEOVIM_INSTALL_DIR="$PWD/build-ai/nvim-data/site/pack/sos/start/sos"
 cmake --build build-ai
 ./build-ai/tui/bin/sos
 ```
@@ -629,6 +637,23 @@ ctest --test-dir build-ai --output-on-failure
 ```
 
 The human uses the same command with `--test-dir build`.
+
+### Native Neovim tests
+
+With Neovim 0.10+ and Python 3 installed, run from the repository root:
+
+```sh
+nvim --headless -u NONE -l integrations/neovim/tests/run.lua
+```
+
+Fixtures and generated data stay under `build-ai/neovim/`. With
+`build-ai/bin/sosd` built, `python3 integrations/neovim/tests/smoke.py` checks
+native sessions against an isolated daemon and local provider;
+`python3 integrations/neovim/tests/smoke.py --lifecycle` additionally checks
+planning, construction, correction, preserved inspection and explicit import.
+The lifecycle fixture verifies original files change only after final validation
+and its staged index remains byte-for-byte intact. These use disposable fixture
+repositories, no live credentials and no personal Neovim configuration.
 
 ### Python/Textual tests
 

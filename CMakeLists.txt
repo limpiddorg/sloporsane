@@ -52,6 +52,8 @@ if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+add_subdirectory(cmake/install-neovim)
+
 option(SOS_BUILD_TEXTUAL "Build and install the Python/Textual integration" ON)
 if(SOS_BUILD_TEXTUAL)
     add_subdirectory(cmake/build-tui)
