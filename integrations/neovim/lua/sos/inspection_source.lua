@@ -12,10 +12,10 @@ function M.path(root,path)
   if real and inside(real,base) then return real end
 end
 
-function M.occupied(path)
+function M.occupied(path,owned)
   for _,buffer in ipairs(vim.api.nvim_list_bufs()) do
     local name=vim.api.nvim_buf_get_name(buffer)
-    if name~='' and (name==path or uv.fs_realpath(name)==path) then return true end
+    if not (owned and owned[buffer]) and name~='' and (name==path or uv.fs_realpath(name)==path) then return true end
   end
   return false
 end
@@ -30,12 +30,16 @@ function M.matches(path,expected)
   return bytes==expected
 end
 
-function M.resolve(diff,root,archive)
+function M.resolve(diff,root,archive,owned)
   local patch=diff.patch or ''
-  local binary=patch:find('GIT binary patch',1,true) or patch:find('Binary',1,true)
+  -- Metadata is recognized only before the first hunk, never inside source text.
+  local header=patch:match('^(.-)\n@@ ') or (patch:match('^@@ ') and '') or patch
+  local function header_line(pattern) return ('\n'..header..'\n'):find('\n'..pattern..'\n') end
+  local binary=header_line('GIT binary patch') or header_line('Binary files .- differ')
+    or header_line('Binary contents changed %(preserved in snapshot blobs%).')
     or (diff.after or ''):find('\0',1,true) or (diff.before or ''):find('\0',1,true)
-  local deleted=patch:find('+++ /dev/null',1,true) or patch:find('deleted file mode',1,true)
-  local added=patch:find('--- /dev/null',1,true) or patch:find('new file mode',1,true)
+  local deleted=header_line('%+%+%+ /dev/null') or header_line('deleted file mode %d+')
+  local added=header_line('%-%-%- /dev/null') or header_line('new file mode %d+')
   if binary then return {kind='binary',label='Historical · Binary change · '..diff.path,
     text='Binary change. Contents are preserved by the daemon and are not available as text.\n'..patch} end
   if deleted then return {kind='deleted',side='before',label='Historical · Deleted · before contents · '..diff.path,text=diff.before or ''} end
@@ -45,9 +49,9 @@ function M.resolve(diff,root,archive)
       text=diff.before}
   end
   local path=M.path(root,diff.path)
-  local opaque_kind=patch:find('File kind/mode:',1,true) or patch:find('120000',1,true)
+  local opaque_kind=header:find('File kind/mode:',1,true) or header:find('120000',1,true)
   local reason=archive and 'Archive' or opaque_kind and 'File kind/mode change' or not path and 'File absent or outside isolated workspace'
-    or M.occupied(path) and 'Existing editor buffer' or not M.matches(path,expected) and 'Current file differs from preserved result' or nil
+    or M.occupied(path,owned) and 'Existing editor buffer' or not M.matches(path,expected) and 'Current file differs from preserved result' or nil
   if not reason then
     return {kind='live',path=path,label='Live verified · Isolated · '..diff.path,text=expected,added=added~=nil}
   end

@@ -9,14 +9,22 @@ function M.panel()
 end
 
 function M.action(name)
-  if name == 'toggle' then M.panel():toggle()
+  if name == 'toggle' then
+    local p=M.panel()
+    p:toggle()
+    -- Opening fetches saved defaults without creating a session. Reconnection
+    -- after an established connection is still explicit, never a toggle side effect.
+    if p.input and not M.session().ever_connected then M.connect() end
   elseif name == 'send' then
     local s = M.session()
+    if s.current.draft:match('^/permissions%s*$') then require('sos.actions').permission(s); return end
     if s.workflow:readonly(s.current) then s:notice('This context is read-only; use :SosContext'); return end
     if s.current.draft:match('^/') then require('sos.actions').slash(s)
     else s:send() end
   else
-    M.panel():show()
+    local navigation={steps=true,inspect=true,next_substep=true,previous_substep=true,next_change=true,
+      previous_change=true,explanation=true,before=true}
+    if not navigation[name] then M.panel():show() end
     local s = M.session()
     s[name](s)
   end

@@ -24,8 +24,8 @@ local function attach(id,info,records)
     messageIndex=n-1,partIndex=0,last=true,data=vim.json.encode(row)}) end
   client:reply({type='session.attached',requestId=request,sessionId=id,messageCount=#records,info=info})
 end
-local select=vim.ui.select
-vim.ui.select=function(rows,_,callback) callback(rows[1]) end
+local select=require('sos.ui').select
+require('sos.ui').select=function(rows,_,callback) callback(rows[1]) end
 w:open_objective({id='old-objective'},false)
 assert(client.sent[#client.sent].frame.objectiveId=='old-objective')
 local info={discussion_id='discussion',implementation_view=true,implementation_archive=false,
@@ -33,6 +33,14 @@ local info={discussion_id='discussion',implementation_view=true,implementation_a
 attach('branch',info,{})
 assert(client.sent[#client.sent].frame.implementation_request==true)
 assert(client.sent[#client.sent].frame.text=='Implementation plan request')
+local planning_current,planning_requests=s.current,#client.sent
+w:discussion()
+assert(s.current==planning_current and #client.sent==planning_requests,
+  'Discussion became selectable while the implementation plan was generating')
+assert(w.contexts.discussion.draft=='Discussion draft','Planning discarded the saved Discussion')
+w:choose_context()
+assert(s.current==planning_current and #client.sent==planning_requests,
+  'The context picker bypassed the disabled Discussion tab')
 local generate=client.sent[#client.sent]
 client:reply({type='message.accepted',requestId=generate.id})
 client:reply({type='execution.completed',sessionId='branch',info=vim.tbl_extend('force',info,{implementation_plan_ready=true,
@@ -40,41 +48,41 @@ client:reply({type='execution.completed',sessionId='branch',info=vim.tbl_extend(
 s.current.draft='Planning draft'
 w:show_plan(); assert(w:readonly(s.current) and s.current.records[1].content=='Final plan')
 w:planning(); assert(s.current.draft=='Planning draft')
-w:start(); assert(client.sent[#client.sent].frame.type=='implementation.start' and client.sent[#client.sent].frame.pace=='step_by_step')
+s:implement(); assert(client.sent[#client.sent].frame.type=='implementation.start' and client.sent[#client.sent].frame.pace=='step_by_step')
 local state={status='running',preparing=true,work_step=0,review_step=0,
   plan={steps={{title='First',objective='Build it',substeps={{title='Part'}}},{title='Second',substeps={{title='Next'}}}}},
   steps={{identity='first',generation=1,whole={complete=false,reviewed=false},validation={started=false,complete=false},substeps={{complete=false}}},
     {identity='second',generation=1,whole={complete=false,reviewed=false},validation={started=false,complete=false},substeps={{complete=false}}}}}
 local function update() client:reply({type='implementation.updated',sessionId='branch',implementation=vim.deepcopy(state),info=info}) end
 update(); assert(w:progress():find('Preparing'))
-assert(s.current.kind=='step' and s.current.step==0)
+assert(s.current.kind=='review' and s.current.step==0 and #s.current.records==0 and w:readonly(s.current))
 w:planning()
 local panel=Panel.new(s); panel:show()
 local branch=s.current
 local count=#client.sent
 w:discussion()
-assert(s.current.id=='discussion' and s.current.preview and s.current.draft=='Discussion draft')
-assert(client.conversation.session_id=='branch' and not vim.bo[s.current.view.input].modifiable)
-assert(vim.wo[panel.input].winbar:find('/original') and vim.wo[panel.input].winbar:find('/isolated'))
-count=#client.sent; s:send(); assert(#client.sent==count)
-s:toggle_mode(); assert(#client.sent==count)
+assert(s.current==branch and s.current.notice:find('Discussion is preserved but unavailable',1,true))
+assert(w.contexts.discussion.draft=='Discussion draft' and not w.contexts.discussion.preview)
+assert(client.conversation.session_id=='branch' and #client.sent==count)
 w:planning(); assert(s.current==branch and s.current.draft=='Planning draft')
+assert(vim.wo[panel.transcript].winbar=='%#SosMuted# Discussion %#SosTabActive# Implement %#SosNormal#%=%#SosVersion#dev %*')
 w:steps(); local menu=w.selector
-vim.api.nvim_win_set_cursor(menu.window,{3,0})
-local focus=panel.input
+assert(#menu.rows==2 and menu.rows[1].key=='first' and menu.rows[2].key=='second')
+vim.api.nvim_win_set_cursor(menu.window,{2,0})
+local focus=panel.transcript
 vim.api.nvim_set_current_win(focus)
 state.preparing=false; state.steps[1].validation.started=true
 update()
-assert(vim.api.nvim_get_current_win()==focus and vim.api.nvim_win_get_cursor(menu.window)[1]==3)
+assert(vim.api.nvim_get_current_win()==focus and vim.api.nvim_win_get_cursor(menu.window)[1]==2)
 assert(w:progress():find('Validating') and not w:eligible(0,1))
 client:reply({type='execution.completed',sessionId='branch'})
 assert(w.state.status=='running' and w:progress():find('Validating'),'Tool/turn termination invented completion')
 menu:close()
 state.steps[1].whole.complete=true; state.status='waiting'; update()
 assert(w:progress():find('Waiting') and w:eligible(0,1) and not w:eligible(1,1))
-vim.ui.select=function(rows,_,callback) callback(rows[2]) end
+require('sos.ui').select=function(rows,_,callback) callback(rows[2]) end
 w:choose_review(0); assert(s.current.kind=='review' and s.current.substep==0)
-vim.ui.select=function(rows,_,callback) callback(rows[1]) end
+require('sos.ui').select=function(rows,_,callback) callback(rows[1]) end
 w:review(0,1); s.current.draft='Whole question'; local whole=s.current
 w:review(0,0); assert(s.current.draft==''); s.current.draft='Part question'
 s:send(); local review=client.sent[#client.sent]
@@ -90,7 +98,7 @@ client:reply({type='btw.chunk',requestId='review',sessionId='branch',messageInde
 client:reply({type='btw.finished',requestId='review',sessionId='branch',messageCount=1})
 assert(s.current.records[1].content=='Review answer' and branch.records==before)
 state.status='interrupted'; update(); assert(w:progress():find('Interrupted'))
-vim.ui.select=function(rows,_,callback) callback(rows[2]) end
+require('sos.ui').select=function(rows,_,callback) callback(rows[2]) end
 w:resume(); assert(client.sent[#client.sent].frame.type=='implementation.resume')
 state.status='running'; update(); s:cancel(); assert(client.sent[#client.sent].frame.type=='implementation.review.cancel')
 w:planning(); s:cancel(); assert(client.sent[#client.sent].frame.type=='execution.cancel')
@@ -105,5 +113,5 @@ assert(w:progress():find('Saved failure')); w:auto_retry()
 assert(client.sent[#client.sent].frame.type=='implementation.auto_plan' and client.sent[#client.sent].frame.pace=='everything')
 w.info.implementation_archive=true
 count=#client.sent; w:auto_retry(); assert(#client.sent==count)
-panel:hide(); vim.ui.select=select
+panel:hide(); require('sos.ui').select=select
 print('SOS planning/context/progress tests passed')

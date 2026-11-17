@@ -19,6 +19,7 @@ if(NOT NVIM_RESULT EQUAL 0 OR NOT NVIM_DATA)
     return()
 endif()
 set(SOS_NEOVIM_INSTALL_DIR "${NVIM_DATA}/site/pack/sos/start/sos" CACHE PATH "Native SOS Neovim plugin destination")
+file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/VERSION" CONTENT "@SOS_VERSION@\n" @ONLY)
 add_custom_target(install-neovim ALL
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${SOS_NEOVIM_INSTALL_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -32,6 +33,8 @@ add_custom_target(install-neovim ALL
     COMMAND "${CMAKE_COMMAND}" -E rename "${SOS_NEOVIM_INSTALL_DIR}/bin/sosd.new" "${SOS_NEOVIM_INSTALL_DIR}/bin/sosd"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${PROJECT_SOURCE_DIR}/integrations/neovim/README.md" "${SOS_NEOVIM_INSTALL_DIR}/README.md"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_CURRENT_BINARY_DIR}/VERSION" "${SOS_NEOVIM_INSTALL_DIR}/VERSION"
     DEPENDS sosd
     COMMENT "Installing the native SOS Neovim plugin and daemon"
     VERBATIM)

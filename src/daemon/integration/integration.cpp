@@ -48,7 +48,10 @@ Integration::Integration(asio::io_context& io, ConnectionSocket connection, Sess
     });
 }
 
-Integration::~Integration() { registry.unwatchWorkspace(this); }
+Integration::~Integration() {
+    reasoningWarmupCancellation->store(true);
+    registry.unwatchWorkspace(this);
+}
 
 std::filesystem::path Integration::currentWorkspace() const {
     return session ? session->getInfo().workspace : idleWorkspace.empty() ? permissions->root() : idleWorkspace;
@@ -153,6 +156,7 @@ nlohmann::json Integration::makePing() {
 void Integration::close() {
     if (closing) return;
     closing = true;
+    reasoningWarmupCancellation->store(true);
     healthTimer.cancel();
     connection.close();
     if (preparingCancellation) preparingCancellation->store(true);
@@ -641,7 +645,32 @@ asio::awaitable<void> Integration::sendHistoryFrame(nlohmann::json frame) {
     if (closing) co_return;
     if (frame.dump().size() + 1 > HistoryChunks::MAX_FRAME_BYTES)
         throw std::invalid_argument("History frame exceeds the size limit");
+    const bool attached = frame.value("type", "") == "session.attached";
     co_await connection.send(std::move(frame));
+    if (attached && !closing) {
+        const auto selected = providerConnection.selection();
+        prefetchReasoning(selected.provider, selected.model);
+    }
+}
+
+void Integration::prefetchReasoning(const std::string& provider, const std::string& model, bool refresh) {
+    if (!providers || closing || model.empty()) return;
+    const auto key = std::pair{provider, model};
+    if (!refresh && prefetchedReasoning == key) return;
+    prefetchedReasoning = key;
+    std::erase_if(reasoningWarmups, [](auto& job) {
+        return job.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    });
+    // Keep the job owned until completion, but never wait before acknowledging
+    // startup/selection. The shared cache coalesces a concurrent first shortcut.
+    reasoningWarmups.push_back(std::async(std::launch::async,
+        [connections = providers, provider, model, cancel = reasoningWarmupCancellation] {
+            try { connections->reasoningEfforts(provider, model, [cancel] { return cancel->load(); }); }
+            catch (const std::exception&) {
+                // Speculative discovery must not block opening or surface a dialog.
+                // A real shortcut retries normally and reports any remaining error.
+            }
+        }));
 }
 
 asio::awaitable<nlohmann::json> Integration::nextReasoningEffort(const IntegrationRequest& request) {
@@ -650,7 +679,7 @@ asio::awaitable<nlohmann::json> Integration::nextReasoningEffort(const Integrati
     const auto model = selected.model;
     const auto provider = selected.provider;
     auto loading = std::async(std::launch::async, [load = reasoningEffortsLoader, connections = providers, model, provider] {
-        return connections ? connections->create(provider)->getReasoningEfforts(model) : load(model);
+        return connections ? connections->reasoningEfforts(provider, model) : load(model);
     });
     co_await awaitFuture(loading);
     const auto efforts = loading.get();
@@ -1044,8 +1073,12 @@ asio::awaitable<nlohmann::json> Integration::dispatch(Event& event) {
 asio::awaitable<void> Integration::sendReply(nlohmann::json reply) {
     if (reply.is_null() || closing) co_return;
     reply["info"] = runtimeInfo();
+    const auto provider = reply["info"]["provider"].get<std::string>();
+    const auto model = reply["info"]["model"].get<std::string>();
+    const auto type = reply.value("type", "");
     try { co_await connection.send(std::move(reply)); }
     catch (...) { close(); }
+    prefetchReasoning(provider, model, type == "model.listed" || type == "auth.saved");
 }
 
 asio::awaitable<void> Integration::run() {
@@ -1060,6 +1093,9 @@ asio::awaitable<void> Integration::run() {
     detachSession();
     registry.unwatchWorkspace(this);
     co_await providerConnection.drain();
+    reasoningWarmupCancellation->store(true);
+    for (auto& job : reasoningWarmups) co_await awaitFuture(job);
+    reasoningWarmups.clear();
     if (mcpOAuth) {
         mcpOAuth->cancelled->store(true);
         co_await awaitFuture(mcpOAuth->completion);

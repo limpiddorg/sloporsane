@@ -39,6 +39,20 @@ runs:
         jobs=$(build-ai/tui-venv/bin/python -c 'import os; print(os.cpu_count() or 1)')
         echo "SOS_BUILD_JOBS=$jobs" >> "$GITHUB_ENV"
         echo "Using $jobs workers for builds and tests"
+    - name: Install minimum supported Neovim
+      shell: bash
+      run: |
+        case "$(uname -s):$(uname -m)" in
+          Darwin:arm64) archive=nvim-macos-arm64 ;;
+          Linux:x86_64) archive=nvim-linux-x86_64 ;;
+          *) echo 'Unsupported Neovim test platform' >&2; exit 1 ;;
+        esac
+        mkdir -p build-ai/neovim-runtime
+        curl --fail --location --retry 3 \
+          "https://github.com/neovim/neovim/releases/download/v0.10.4/$archive.tar.gz" \
+          -o build-ai/neovim-runtime/nvim.tar.gz
+        tar -xzf build-ai/neovim-runtime/nvim.tar.gz -C build-ai/neovim-runtime
+        echo "$GITHUB_WORKSPACE/build-ai/neovim-runtime/$archive/bin" >> "$GITHUB_PATH"
     - name: Configure
       shell: bash
       env:
@@ -50,13 +64,22 @@ runs:
           -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
           -DSOS_BUILD_TEXTUAL=ON -DBUILD_TESTING=ON \
           -DSOS_TUI_BIN_DIR="$GITHUB_WORKSPACE/build-ai/install/bin" \
-          -DSOS_TUI_INSTALL_DIR="$GITHUB_WORKSPACE/build-ai/install/app"
+          -DSOS_TUI_INSTALL_DIR="$GITHUB_WORKSPACE/build-ai/install/app" \
+          -DSOS_NEOVIM_INSTALL_DIR="$GITHUB_WORKSPACE/build-ai/neovim-runtime/plugin"
     - name: Compile
       shell: bash
       run: cmake --build build-ai --parallel "$SOS_BUILD_JOBS" --target sosd agent-runtime-tests daemon-transport-tests daemon-session-tests session-fixture
     - name: Native tests
       shell: bash
       run: ctest --test-dir build-ai --output-on-failure --parallel "$SOS_BUILD_JOBS" -E '^TuiBundleTest\.'
+    - name: Native Neovim client tests
+      shell: bash
+      run: |
+        nvim --version
+        nvim --headless -u NONE -l integrations/neovim/tests/run.lua
+        python3 integrations/neovim/tests/smoke.py
+        python3 integrations/neovim/tests/smoke.py --lifecycle
+        cmake --build build-ai --target install-neovim
     - name: Textual and installer tests
       shell: bash
       run: |

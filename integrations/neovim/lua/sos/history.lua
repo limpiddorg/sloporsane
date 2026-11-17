@@ -34,7 +34,8 @@ function M.accept(transfer, event)
 end
 
 function M.new(session, current)
-  return setmetatable({session=session,current=current,page={},pending={},cache={},generation=0}, M)
+  return setmetatable({session=session,current=current,page={},pending={},cache={},generation=0,live_ids={},
+    clock=session and function() return vim.uv.hrtime()/1e6 end or nil}, M)
 end
 
 function M:changed() self.session:changed() end
@@ -74,7 +75,8 @@ function M:install(records, page)
   end
   self.cache = retained
   self.current.records, self.page = records, page or {}
-  self.group, self.calls = nil, {}
+  self.optimistic=nil
+  self.group, self.active, self.calls, self.live_ids = nil, nil, {}, {}
   for _, record in ipairs(records) do
     if record.role == 'activity' then
       for _, item in ipairs(record.activities or {}) do
@@ -201,12 +203,89 @@ function M:load(group, index)
   self:changed()
 end
 
+function M:start_turn()
+  self.submitted_at=self.clock and self.clock() or nil
+end
+
+function M:finish(metadata)
+  local group=self.active
+  if not group then return end
+  if type(metadata)=='table' and type(metadata.duration_ms)=='number' then
+    group.metadata=vim.deepcopy(metadata)
+  elseif group._started_at and self.clock then
+    group.duration_ms=math.max(0,self.clock()-group._started_at)
+  end
+  group._started_at=nil
+end
+
 local function ensure_group(self, message, part)
   if self.group then return self.group end
+  local now=self.clock and self.clock()
+  local previous=self.active
+  if previous then
+    previous.terminal=false
+    if type(message.elapsed_ms)=='number' and previous._start_offset then
+      previous.duration_ms=math.max(0,message.elapsed_ms-previous._start_offset)
+    elseif previous._started_at and now then previous.duration_ms=math.max(0,now-previous._started_at) end
+    previous._started_at=nil
+  end
   local group = {id=message.id .. '/activity/' .. tostring(part),role='activity',content={},activities={},count=0,terminal=true}
+  group._started_at=previous and now or self.turn_started or now
+  group._start_offset=previous and message.elapsed_ms or 0
   table.insert(self.current.records,group)
-  self.group = group
+  self.group,self.active = group,group
   return group
+end
+
+local function model_call(group,call)
+  -- Fail closed for missing usage or arithmetic beyond Lua's exact integer range.
+  local limit=9007199254740991
+  local function valid(value) return type(value)=='number' and value>=0 and value<=limit and value%1==0 end
+  if type(call)~='table' or not valid(call.duration_ms) then
+    group._unknown_usage=true
+    if group.model_call then group.model_call.output_tokens=nil end
+    return
+  end
+  local stats=group.model_call or {duration_ms=0,output_tokens=0}
+  stats.model,stats.reasoning=call.model,call.reasoning
+  local duration=stats.duration_ms+call.duration_ms
+  if not valid(duration) then group._unknown_usage=true else stats.duration_ms=duration end
+  if group._unknown_usage or not valid(call.output_tokens) or not valid(stats.output_tokens)
+    or not valid(stats.output_tokens+call.output_tokens) then
+    group._unknown_usage=true; stats.output_tokens=nil
+  else stats.output_tokens=stats.output_tokens+call.output_tokens end
+  group.model_call=stats
+  group.generation={model=call.model,reasoning=call.reasoning}
+end
+
+-- Provisional turns are local UI feedback, never persisted or fetched as history.
+function M:optimistic_turn(text,mode)
+  self.local_sequence=(self.local_sequence or 0)+1
+  local id='local-turn:'..self.local_sequence
+  self:start_turn()
+  local first,last=self.page.first,self.page.last
+  self:live({local_turn=true,messages={{id=id,role='user',content={{type='text',text=text}},metadata={mode=mode}}}})
+  self.optimistic={user=self.current.records[#self.current.records-1],group=self.active,id=id}
+  self.page.first,self.page.last=first,last
+end
+
+function M:reject_turn()
+  local turn=self.optimistic
+  if not turn then return end
+  local records={}
+  for _,record in ipairs(self.current.records) do
+    if record~=turn.user and record~=turn.group then records[#records+1]=record end
+  end
+  self.current.records=records
+  self.live_ids[turn.id]=nil
+  if self.active==turn.group then self.active=nil end
+  if self.group==turn.group then self.group=nil end
+  self.optimistic=nil
+  self.page.last=nil
+  for i=#records,1,-1 do
+    if records[i].role=='user' or records[i].role=='assistant' then self.page.last=records[i].id; break end
+  end
+  if #records==0 then self.page.first=nil end
 end
 
 function M:live(event)
@@ -215,18 +294,39 @@ function M:live(event)
   self.calls = self.calls or {}
   for _, message in ipairs(event.messages or {}) do
     -- Snapshot/live overlap uses source IDs; mixed text parts share one source ID.
-    local seen = false
+    local seen = self.live_ids[message.id] or false
+    local turn=self.optimistic
+    if turn and message.role=='user' and message.id~=turn.id then
+      -- Adopt the daemon identity without restarting Activity or duplicating text.
+      for key in pairs(turn.user) do turn.user[key]=nil end
+      for key,value in pairs(vim.deepcopy(message)) do turn.user[key]=value end
+      turn.group.id=message.id..'/activity/0'
+      self.live_ids[turn.id]=nil
+      self.live_ids[message.id]=true
+      self.optimistic=nil
+      seen=true
+    end
     for _, record in ipairs(self.current.records) do
       if record.id == message.id then seen = true; break end
     end
     if not seen and message.role ~= 'system' then
       if message.role == 'user' then
+        self:finish()
+        self.turn_started=self.submitted_at or (self.clock and self.clock())
+        self.submitted_at=nil
+        self.live_ids={}
         table.insert(self.current.records,vim.deepcopy(message))
-        self.group = nil
+        self.group,self.active = nil,nil
         ensure_group(self,message,0)
       elseif message.role == 'activity' then
         table.insert(self.current.records,vim.deepcopy(message))
       else
+        -- A response belongs to the Activity awaiting it, before its text/tool parts.
+        if message.role=='assistant' and not message.user_skill and (self.active or message.model_call or message.metadata) then
+          local active=self.active or ensure_group(self,message,0)
+          model_call(active,message.model_call)
+          if message.metadata then self:finish(message.metadata) end
+        end
         for part, block in ipairs(message.content or {}) do
           if block.type == 'text' and block.text and block.text:match('%S') and message.role == 'assistant' then
             local record = vim.deepcopy(message)
@@ -251,7 +351,11 @@ function M:live(event)
           end
         end
       end
+      self.live_ids[message.id]=true
     end
+  end
+  if event.type=='execution.completed' or event.type=='execution.failed' or event.type=='execution.cancelled' then
+    self:finish(event.metadata)
   end
   -- Bound visible messages by source identity, including all fragments of a message.
   local order, seen = {}, {}
@@ -260,7 +364,7 @@ function M:live(event)
       table.insert(order,record.id); seen[record.id]=true
     end
   end
-  if #order > 20 then
+  if not event.local_turn and not self.unbounded and #order > 20 then
     local remove = {}; for i=1,#order-20 do remove[order[i]]=true end
     local start = 1
     while start <= #self.current.records do
@@ -274,6 +378,7 @@ function M:live(event)
     for _, record in ipairs(self.current.records) do if record.role == 'activity' then groups[record.id]=true end end
     for call, ref in pairs(self.calls) do if not groups[ref.group.id] then self.calls[call]=nil end end
     if self.group and not groups[self.group.id] then self.group=nil end
+    if self.active and not groups[self.active.id] then self.active=nil end
     self.page.hasOlder = true
   end
   for _, record in ipairs(self.current.records) do
@@ -285,6 +390,20 @@ function M:live(event)
     local record = self.current.records[i]
     if record.role == 'user' or record.role == 'assistant' then self.page.last=record.id; break end
   end
+end
+
+-- Construction evidence is already preserved in implementation.state. Project it
+-- locally using the same Activity shape, without querying principal chat history.
+function M.project(messages,prefix)
+  local current={records={}}
+  local history=M.new(nil,current)
+  history.unbounded=true
+  for n,message in ipairs(messages) do
+    local copy=vim.deepcopy(message)
+    copy.id=prefix..'/'..tostring(message.id or n)..'/'..n
+    history:live({messages={copy}})
+  end
+  return current.records
 end
 
 return M

@@ -5,6 +5,7 @@
 #include <agent-runtime/providers/openai_oauth.hpp>
 #include <agent-runtime/providers/chat_completions_provider.hpp>
 #include <openssl/rand.h>
+#include <openssl/sha.h>
 
 void to_json(nlohmann::json& json, const ProviderDescriptor& provider) {
     json = {{"id", provider.id}, {"connected", provider.connected}, {"model", provider.model}};
@@ -26,9 +27,9 @@ void to_json(nlohmann::json& json, const ModelCatalogError& error) {
 }
 
 ProviderConnections::ProviderConnections(std::shared_ptr<AuthStore> auth, std::filesystem::path config,
-    OAuthStarter oauthStarter, ModelCatalog catalog, ApiKeyValidator keyValidator)
+    OAuthStarter oauthStarter, ModelCatalog catalog, ApiKeyValidator keyValidator, ReasoningEffortsLoader reasoningLoader)
     : auth(std::move(auth)), config(std::move(config)), oauthStarter(std::move(oauthStarter)),
-      catalog(std::move(catalog)), keyValidator(std::move(keyValidator)) {}
+      catalog(std::move(catalog)), keyValidator(std::move(keyValidator)), reasoningLoader(std::move(reasoningLoader)) {}
 
 ProviderSelection ProviderConnections::selection() const {
     const auto data = readPrivateJson(config);
@@ -188,6 +189,63 @@ bool ProviderConnections::hasAuth(const std::string& provider) const {
     return activeAuthMethod(provider).has_value();
 }
 
+std::array<unsigned char, 32> ProviderConnections::reasoningIdentity(const std::string& provider) const {
+    validateProviderId(provider);
+    const bool custom = provider.starts_with("custom-");
+    const auto endpoint = custom ? customDefinition(provider).baseUrl : "";
+    const auto credential = custom && !auth->contains(provider) ? ProviderCredential{} : auth->get(provider);
+    // Token refresh within the same OAuth account does not change model capabilities.
+    // Hash the identity so this in-memory cache need not retain another credential copy.
+    const auto identity = nlohmann::json::array({provider, endpoint, static_cast<int>(credential.kind),
+        credential.method ? static_cast<int>(*credential.method) : -1, credential.accountId,
+        credential.kind == AuthKind::API ? credential.key : credential.accountId.empty() ? credential.access : ""}).dump();
+    std::array<unsigned char, 32> digest;
+    SHA256(reinterpret_cast<const unsigned char*>(identity.data()), identity.size(), digest.data());
+    return digest;
+}
+
+std::vector<std::string> ProviderConnections::reasoningEfforts(const std::string& provider, const std::string& model,
+    core::CancellationCheck cancelled) const {
+    core::checkCancellation(cancelled);
+    const auto identity = reasoningIdentity(provider);
+    std::shared_ptr<ReasoningLoad> load;
+    bool owner = false;
+    {
+        std::lock_guard lock(reasoningMutex);
+        auto& capabilities = reasoningCapabilities[provider];
+        if (capabilities.identity != identity) capabilities = {identity, {}};
+        auto& entry = capabilities.models[model];
+        if (!entry) { entry = std::make_shared<ReasoningLoad>(); owner = true; }
+        load = entry;
+    }
+    // Workers for the same identity/model share a fill, but slow speculative
+    // discovery must not block a different model behind a global network lock.
+    if (owner) {
+        try {
+            auto instance = reasoningLoader ? nullptr : create(provider);
+            if (instance) instance->setCancellationCheck(cancelled);
+            auto efforts = reasoningLoader ? reasoningLoader(provider, model) : instance->getReasoningEfforts(model);
+            core::checkCancellation(cancelled);
+            if (reasoningIdentity(provider) != identity)
+                throw std::runtime_error("Provider authentication changed while loading reasoning levels; retry");
+            load->result.set_value(std::move(efforts));
+        } catch (...) {
+            {
+                std::lock_guard lock(reasoningMutex);
+                const auto found = reasoningCapabilities.find(provider);
+                if (found != reasoningCapabilities.end()) {
+                    const auto entry = found->second.models.find(model);
+                    if (entry != found->second.models.end() && entry->second == load) found->second.models.erase(entry);
+                }
+            }
+            load->result.set_exception(std::current_exception());
+        }
+    }
+    auto efforts = load->ready.get();
+    core::checkCancellation(cancelled);
+    return efforts;
+}
+
 std::optional<AuthMethod> ProviderConnections::activeAuthMethod(const std::string& provider) const {
     try {
         if (provider.starts_with("custom-")) { customDefinition(provider); return AuthMethod::API_KEY; }
@@ -217,6 +275,10 @@ ProviderAuthorization ProviderConnections::authorize(const std::string& provider
 }
 
 ConnectedModels ProviderConnections::listModels(core::CancellationCheck cancelled) const {
+    {
+        std::lock_guard lock(reasoningMutex);
+        reasoningCapabilities.clear(); // Explicit model discovery refreshes cached capabilities too.
+    }
     ConnectedModels result;
     for (const std::string id : {"openai", "openrouter"}) {
         core::checkCancellation(cancelled);

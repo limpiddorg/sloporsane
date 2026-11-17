@@ -177,6 +177,10 @@ private:
     asio::awaitable<nlohmann::json> navigateSession(const IntegrationRequest& request);
     asio::awaitable<void> sendHistoryFrame(nlohmann::json frame);
     asio::awaitable<nlohmann::json> nextReasoningEffort(const IntegrationRequest& request);
+    void prefetchReasoning(const std::string& provider, const std::string& model, bool refresh = false);
+    std::pair<std::string, std::string> prefetchedReasoning;
+    std::vector<std::future<void>> reasoningWarmups;
+    std::shared_ptr<std::atomic<bool>> reasoningWarmupCancellation = std::make_shared<std::atomic<bool>>(false);
     asio::awaitable<nlohmann::json> sendMessage(const IntegrationRequest& request);
     std::vector<Session::LoadedSkill> loadSkills(const IntegrationRequest& request) const;
     asio::awaitable<void> checkImageInput(bool hasNewImages);

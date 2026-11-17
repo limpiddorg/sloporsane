@@ -9,6 +9,8 @@
 #include <agent-runtime/providers/provider_auth.hpp>
 #include <agent-runtime/providers/model_catalog.hpp>
 #include <agent-runtime/providers/api_key_validator.hpp>
+#include <array>
+#include <map>
 
 struct CustomProviderDefinition {
     std::string name;
@@ -51,9 +53,11 @@ class ProviderConnections {
 public:
     using OAuthStarter = std::function<std::unique_ptr<ProviderAuthFlow>(const std::string&,
         std::shared_ptr<std::atomic<bool>>)>;
+    using ReasoningEffortsLoader = std::function<std::vector<std::string>(const std::string&, const std::string&)>;
     explicit ProviderConnections(std::shared_ptr<AuthStore> auth = std::make_shared<AuthStore>(),
         std::filesystem::path config = PathResolution::configFile(), OAuthStarter oauthStarter = {},
-        ModelCatalog catalog = ModelCatalog{}, ApiKeyValidator keyValidator = ApiKeyValidator{});
+        ModelCatalog catalog = ModelCatalog{}, ApiKeyValidator keyValidator = ApiKeyValidator{},
+        ReasoningEffortsLoader reasoningLoader = {});
     ProviderSelection selection() const;
     std::string defaultReasoning(const ProviderSelection& selection) const;
     void select(const ProviderSelection& selection);
@@ -69,6 +73,8 @@ public:
         std::optional<PermissionVerifierConfig> model = {}, const std::string& key = "");
     PermissionManager::Verifier permissionVerifier(const std::string& workspace, const std::string& context) const;
     std::unique_ptr<Provider> create(const std::string& provider) const;
+    std::vector<std::string> reasoningEfforts(const std::string& provider, const std::string& model,
+        core::CancellationCheck cancelled = {}) const;
     bool hasAuth(const std::string& provider) const;
     std::optional<AuthMethod> activeAuthMethod(const std::string& provider) const;
     void requireAuth(const std::string& provider) const;
@@ -94,6 +100,18 @@ private:
     OAuthStarter oauthStarter;
     ModelCatalog catalog;
     ApiKeyValidator keyValidator;
+    ReasoningEffortsLoader reasoningLoader;
+    struct ReasoningLoad {
+        std::promise<std::vector<std::string>> result;
+        std::shared_future<std::vector<std::string>> ready = result.get_future().share();
+    };
+    struct ReasoningCapabilities {
+        std::array<unsigned char, 32> identity{};
+        std::map<std::string, std::shared_ptr<ReasoningLoad>> models;
+    };
+    std::array<unsigned char, 32> reasoningIdentity(const std::string& provider) const;
+    mutable std::mutex reasoningMutex;
+    mutable std::map<std::string, ReasoningCapabilities> reasoningCapabilities;
     mutable std::recursive_mutex permissionMutex;
 };
 

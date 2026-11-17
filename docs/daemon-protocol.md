@@ -1654,8 +1654,20 @@ supported values; `none` and `minimal` are excluded from this shortcut.
 OpenRouter supplies `reasoning.supported_efforts` in its model catalog. An explicit
 null accepts all gateway efforts; an absent field, an unknown model or an empty
 selection returns `request.failed` without changing the selected level. The
-metadata client caches successful catalog retrievals and runs off the Asio thread,
-independently of generation requests.
+daemon caches successfully discovered levels in memory, shared across integrations
+and separated by provider, model and authentication identity. OAuth token rotation
+within the same account preserves the cache; account, authentication method, API
+key or custom endpoint changes invalidate the affected provider's entries. Explicit
+`model.list` discovery clears this cache too. Failed discovery is not cached.
+The daemon preloads levels in the background after announcing readiness, after a
+provider/model selection or session restoration, and after authentication/catalog
+refresh. This never delays startup or selection acknowledgement, changes a setting,
+creates a session or displays speculative discovery errors. A shortcut arriving
+during preloading shares that lookup; unrelated models load independently. Failed
+preloading leaves normal shortcut discovery/error reporting available. Disconnect
+cancels and drains the owned background jobs. Lookup runs off the Asio thread,
+independently of generation requests. Clients still wait for `reasoning.updated`;
+a very early first shortcut may wait for preloading, but does not fetch twice.
 
 This immediately saves the conversation's reasoning preference and the global default,
 even without another message. Without a session, only the global default changes.

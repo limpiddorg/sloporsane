@@ -93,7 +93,20 @@ class Provider(BaseHTTPRequestHandler):
                         'finish_reason': 'tool_calls' if calls else 'stop'}],
                         'usage': {'prompt_tokens': 100, 'completion_tokens': 50}})
             return
-        self.reply({'id': 'local-test', 'choices': [{'message': {'role': 'assistant',
+        Provider.requests += 1
+        if not title and body['messages'][-1]['role'] == 'user' and 'Refresh loaded files' in str(body['messages'][-1].get('content')):
+            edits = [('write', {'filePath': 'refresh-write.txt', 'content': 'write result\n'}),
+                     ('edit', {'filePath': 'refresh-edit.txt', 'oldString': 'before', 'newString': 'edit result'}),
+                     ('apply_patch', {'patchText': '*** Begin Patch\n*** Update File: refresh-patch.txt\n@@\n-before\n+patch result\n*** End Patch'}),
+                     ('write', {'filePath': 'refresh-dirty.txt', 'content': 'agent disk result\n'}),
+                     ('bash', {'command': "printf 'shell result\\n' > refresh-shell.txt", 'mainCommand': 'printf'})]
+            calls = [{'id': f'refresh-{Provider.requests}-{index}', 'type': 'function',
+                      'function': {'name': name, 'arguments': json.dumps(arguments)}}
+                     for index, (name, arguments) in enumerate(edits)]
+            self.reply({'id': f'refresh-{Provider.requests}', 'choices': [{'message': {
+                'role': 'assistant', 'content': None, 'tool_calls': calls}, 'finish_reason': 'tool_calls'}]})
+            return
+        self.reply({'id': 'local-test-' + str(Provider.requests), 'choices': [{'message': {'role': 'assistant',
                     'content': 'Local test' if title else 'Local answer'}, 'finish_reason': 'stop'}],
                     'usage': {'prompt_tokens': 100, 'completion_tokens': 10}})
 

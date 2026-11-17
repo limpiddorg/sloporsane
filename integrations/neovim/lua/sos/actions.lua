@@ -21,12 +21,12 @@ function M.model(session)
         session:notice('No authenticated models. Configure a provider using SOS /connect in the TUI, then reconnect. Do not enter keys in chat.')
         return
       end
-      vim.ui.select(models, {prompt='SOS model',format_item=function(row)
+      require('sos.ui').select(models, {prompt='SOS model',format_item=function(row)
         return tostring(row.provider) .. ' / ' .. tostring(row.id or row.model)
       end}, function(row)
         if not row then return end
         local maximum = type(row.max_context) == 'number' and row.max_context or nil
-        vim.ui.input({prompt='Context budget (minimum 32768): ',default=maximum and tostring(maximum) or ''}, function(value)
+        require('sos.ui').input({prompt='Context budget (minimum 32768): ',default=maximum and tostring(maximum) or ''}, function(value)
           if not value then return end
           local budget = tonumber(value)
           if not budget or budget % 1 ~= 0 or budget < 32768 or (maximum and budget > maximum) then
@@ -53,11 +53,11 @@ function M.permission(session)
     table.insert(choices,{label='Always allow displayed scopes for this connection',decision='always'})
   end
   local current = session.current
-  vim.ui.select(choices, {prompt='SOS permission: ' .. request.tool .. ' (Enter confirms the selected decision)',format_item=function(row) return row.label end}, function(row)
+  require('sos.ui').select(choices, {prompt='SOS permission: ' .. request.tool .. ' (Enter confirms the selected decision)',format_item=function(row) return row.label end}, function(row)
     if session.permissions[id] ~= request then return end
     session.permission_prompt = nil
     if not row then
-      session:notice('Permission still pending for '..request.tool..'. Use /permissions to reopen; no permission was granted.')
+      session:notice('Permission still pending for '..request.tool..'. Use :SosPermissions to reopen from any context; no permission was granted.')
       return
     end
     if session.permissions[id].pending then return end
@@ -83,8 +83,7 @@ function M.slash(session)
   if command == '/help' then
     session:notice('Supported: ' .. table.concat(commands, ', ') .. '. Use :SosSend explicitly; Insert mode edits, Normal mode reads.')
   elseif command == '/model' then M.model(session)
-  elseif command == '/reasoning' then
-    session:run(function() session:request({type='reasoning.next'}, 'reasoning.updated') end)
+  elseif command == '/reasoning' then session:reasoning()
   elseif command == '/permissions' then M.permission(session)
   else
     local action = ({['/new']='new_session',['/resume']='resume',['/mode']='toggle_mode',['/cancel']='cancel',

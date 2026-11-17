@@ -1,12 +1,20 @@
 local M={}
 M.__index=M
 function M.new(workflow) return setmetatable({workflow=workflow},M) end
-function M:selection()
+function M:selection(latest)
   local w=self.workflow
-  local inspector=w.session.inspector
-  if inspector and inspector.visible then return inspector.model.index,inspector.model.part,inspector.model:selected() end
   local current=w.session.current
-  if current.kind=='review' then return current.step,current.substep end
+  if current.kind=='review' and current.review_key~=w:review_key(current.step) and not latest then return end
+  local inspector=w.session.inspector
+  if inspector and inspector.visible and not (current.kind=='review' and current.review_key~=w:review_key(current.step)) then
+    return inspector.model.index,inspector.model.part,inspector.model:selected()
+  end
+  if current.kind=='review' then
+    for n,step in ipairs((w.state or {}).steps or {}) do
+      if step.identity==current.step_identity then return n-1,current.substep end
+    end
+    return
+  end
   for n,step in ipairs((w.state or {}).steps or {}) do
     if step.identity==w.selected_identity then return n-1,#step.substeps end
   end
@@ -31,11 +39,20 @@ function M:submit(kind,fields,token)
   if self.pending or not self:current(token) then w.session:notice('Result changed or another review action is pending'); return end
   local lock={}
   self.pending=lock
-  local id=w:command(kind,vim.tbl_extend('force',fields,{revision=token.revision}),'implementation.updated',function()
-    if self.pending==lock then self.pending=nil end
+  local step=kind=='implementation.validate' and w.state.steps[fields.step+1]
+  local importing=step and fields.substep==#step.substeps
+  self.importing=importing and token or nil
+  local root=w.info.workspace
+  local id=w:command(kind,vim.tbl_extend('force',fields,{revision=token.revision}),'implementation.updated',function(event)
+    local confirmed=importing and event and event.implementation and event.implementation.steps[fields.step+1]
+    if importing and w.branch_id==token.branch and confirmed and confirmed.identity==token.identity and confirmed.whole.reviewed then
+      w.session.file_refresh:imported(root,step.whole.diffs)
+      w.after_import=fields.step
+    end
+    if self.pending==lock then self.pending,self.importing=nil,nil end
     w.session:changed()
   end)
-  if not id then self.pending=nil end
+  if not id then self.pending,self.importing=nil,nil end
   w.session:changed()
   return id
 end
@@ -57,10 +74,13 @@ function M:validate()
   for _,substep in ipairs(item.substeps) do if not substep.reviewed then unchecked=unchecked+1 end end
   local token=self:snapshot(step)
   self.confirming=true
-  vim.ui.select({'Keep reviewing','Validate and import step'},
+  require('sos.ui').select({'Keep reviewing','Validate and import step'},
     {prompt='Import step '..(step+1)..' into original workspace? '..unchecked..' unchecked indicator(s) will be accepted.'},function(choice)
       self.confirming=false
-      if choice=='Validate and import step' then self:submit('implementation.validate',{step=step,substep=#item.substeps},token) end
+      if choice=='Validate and import step' then
+        if self:available(step,#item.substeps) then self:submit('implementation.validate',{step=step,substep=#item.substeps},token)
+        else w.session:notice('Result changed. Reopen human validation before importing.') end
+      end
     end)
 end
 
@@ -73,6 +93,11 @@ function M:proposal()
   local current={id=w.branch_id,context_key=w.branch_id..'/proposal/'..tostring(state.revision),kind='proposal',
     archived=w.archive_view or w.info.implementation_archive,mode='sane',draft='',workspace=w.info.workspace,
     records={{id='proposal',role='assistant',content=text..'\n\n'..(state.proposed_plan_markdown or '')}}}
+  if not current.archived then
+    current.records[#current.records+1]={id='proposal/accept',role='construction',content='[ Accept proposal ]',group='SosAction',control='accept_proposal'}
+    current.records[#current.records+1]={id='proposal/decline',role='construction',content='[ Decline proposal ]',group='SosAction',control='reject_proposal'}
+    current.focus_control='accept_proposal'
+  end
   w.contexts[current.context_key]=current; w:select(current)
   w.session:notice(state.revision_planning and 'Candidate plan · :SosRevision · :SosAcceptProposal to execute · :SosRejectProposal'
     or 'Proposal · :SosAcceptProposal / :SosRejectProposal')
@@ -96,7 +121,7 @@ function M:proposal_action(accept)
   local label=kind=='implementation.revision.open' and 'Open revised-plan discussion (no execution)'
     or accept and 'Accept proposal and execute corrections' or 'Reject proposal and resume paused work'
   self.confirming=true
-  vim.ui.select({'Keep reviewing',label},{prompt='Revision '..token.revision..': '..label..'?'},function(choice)
+  require('sos.ui').select({'Keep reviewing',label},{prompt='Revision '..token.revision..': '..label..'?'},function(choice)
     self.confirming=false
     if choice==label then self:submit(kind,{},token) end
   end)
@@ -115,6 +140,7 @@ end
 
 function M:versions()
   local w=self.workflow
+  if self.pending then w.session:notice('Wait for the pending review action'); return end
   local branch=w.branch_id
   w:command('implementation.history',{all=true,step=0},'implementation.history',function(event)
     if not event or branch~=w.branch_id then return end
@@ -122,15 +148,19 @@ function M:versions()
     for n,state in ipairs(event.implementations or {}) do
       rows[#rows+1]={label='Archive '..n..' · '..(state.version_request or ''),state=state,key='archive/'..n}
     end
-    vim.ui.select(rows,{prompt='Preserved implementation versions',format_item=function(row) return row.label end},function(row)
-      if not row or branch~=w.branch_id then return end
+    require('sos.ui').select(rows,{prompt='Preserved implementation versions',format_item=function(row) return row.label end},function(row)
+      if not row or branch~=w.branch_id or self.pending or self.confirming then return end
       if row.state then
         if not w.archive_view then w.live_state,w.live_selection=w.state,w.selected_identity end
         w.archive_view,w.archive_key=true,row.key
         w.state=row.state
         w.selected_identity=(row.state.steps[1] or {}).identity
       else self:live() end
-      if w.selected_identity then w:select_step(w.selected_identity); w.session:inspect() end
+      if w.selected_identity then
+        local inspecting=w.session.inspector and w.session.inspector.visible
+        w:select_step(w.selected_identity)
+        if inspecting then w.session:inspect() end
+      end
     end)
   end)
 end

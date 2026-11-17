@@ -925,6 +925,144 @@ TEST(ProviderAuthTest, CodexReasoningLevelsUseCatalogIncludingNoneAndFastAliases
     EXPECT_EQ(provider.getReasoningEfforts("gpt-5.4-pro").front(), "low");
 }
 
+TEST(ReasoningCapabilitiesTest, ReusesLevelsAcrossConnectionsAndSeparatesModelsProvidersAndCredentials) {
+    TempAuth temp;
+    auto store = std::make_shared<AuthStore>(temp.directory / "auth.json");
+    store->set("openai", ProviderCredential{.key = "fake-api"});
+    store->set("openrouter", ProviderCredential{.key = "fake-router"});
+    int loads = 0;
+    auto providers = std::make_shared<ProviderConnections>(store, temp.directory / "config.json",
+        ProviderConnections::OAuthStarter{}, ModelCatalog{}, ApiKeyValidator{},
+        [&](const std::string& provider, const std::string& model) {
+            ++loads;
+            return std::vector<std::string>{provider, model, std::to_string(loads)};
+        });
+    const auto first = providers->reasoningEfforts("openai", "model-a");
+    EXPECT_EQ(providers->reasoningEfforts("openai", "model-a"), first);
+    EXPECT_EQ(loads, 1);
+    EXPECT_NE(providers->reasoningEfforts("openai", "model-b"), first);
+    EXPECT_NE(providers->reasoningEfforts("openrouter", "model-a"), first);
+    EXPECT_EQ(providers->reasoningEfforts("openai", "model-a"), first);
+    EXPECT_EQ(loads, 3);
+    // AuthStore can be updated outside this ProviderConnections instance too.
+    store->set("openai", ProviderCredential{.key = "replacement-api"});
+    EXPECT_NE(providers->reasoningEfforts("openai", "model-a"), first);
+    EXPECT_EQ(loads, 4);
+    store->remove("openai");
+    EXPECT_THROW(providers->reasoningEfforts("openai", "model-a"), std::exception);
+    EXPECT_EQ(loads, 4);
+}
+
+TEST(ReasoningCapabilitiesTest, RefreshWithinAnAccountReusesLevelsButAccountAndAuthMethodChangesDoNot) {
+    TempAuth temp;
+    auto store = std::make_shared<AuthStore>(temp.directory / "auth.json");
+    ProviderCredential credential{.kind = AuthKind::OAUTH, .access = "fake-token", .refresh = "fake-refresh",
+        .accountId = "account-one", .method = AuthMethod::BROWSER};
+    store->set("openai", credential);
+    int loads = 0;
+    ProviderConnections providers(store, temp.directory / "config.json", {}, ModelCatalog{}, ApiKeyValidator{},
+        [&](const std::string&, const std::string&) { ++loads; return std::vector<std::string>{"low", "high"}; });
+    providers.reasoningEfforts("openai", "model");
+    credential.access = "rotated-token";
+    credential.refresh = "rotated-refresh";
+    store->set("openai", credential);
+    providers.reasoningEfforts("openai", "model");
+    EXPECT_EQ(loads, 1);
+    credential.accountId = "account-two";
+    store->set("openai", credential);
+    providers.reasoningEfforts("openai", "model");
+    EXPECT_EQ(loads, 2);
+    credential.method = AuthMethod::DEVICE;
+    store->set("openai", credential);
+    providers.reasoningEfforts("openai", "model");
+    EXPECT_EQ(loads, 3);
+    store->set("openai", ProviderCredential{.key = "fake-api"});
+    providers.reasoningEfforts("openai", "model");
+    EXPECT_EQ(loads, 4);
+}
+
+TEST(ReasoningCapabilitiesTest, CustomEndpointsAndUnauthenticatedProvidersHaveSeparateIdentities) {
+    TempAuth temp;
+    auto store = std::make_shared<AuthStore>(temp.directory / "auth.json");
+    const auto config = temp.directory / "config.json";
+    int loads = 0;
+    ProviderConnections providers(store, config, {}, ModelCatalog{}, ApiKeyValidator{},
+        [&](const std::string&, const std::string&) { ++loads; return std::vector<std::string>{}; });
+    const auto id = providers.addCustom("Local", "http://127.0.0.1:1234/v1", "");
+    EXPECT_TRUE(providers.reasoningEfforts(id, "model").empty());
+    EXPECT_TRUE(providers.reasoningEfforts(id, "model").empty());
+    EXPECT_EQ(loads, 1);
+    auto data = readPrivateJson(config);
+    data["custom_providers"][id]["base_url"] = "http://127.0.0.1:5678/v1";
+    writePrivateJson(config, data);
+    providers.reasoningEfforts(id, "model");
+    EXPECT_EQ(loads, 2);
+    providers.saveApiKey(id, "fake-key");
+    providers.reasoningEfforts(id, "model");
+    EXPECT_EQ(loads, 3);
+    providers.deleteCustom(id);
+    EXPECT_THROW(providers.reasoningEfforts(id, "model"), std::runtime_error);
+}
+
+TEST(ReasoningCapabilitiesTest, RetriesFailuresAndRejectsAuthenticationChangesDuringDiscovery) {
+    TempAuth temp;
+    auto store = std::make_shared<AuthStore>(temp.directory / "auth.json");
+    store->set("openai", ProviderCredential{.key = "fake-api"});
+    int loads = 0;
+    ProviderConnections providers(store, temp.directory / "config.json", {}, ModelCatalog{}, ApiKeyValidator{},
+        [&](const std::string&, const std::string&) -> std::vector<std::string> {
+            ++loads;
+            if (loads == 1) throw std::runtime_error("Catalog unavailable");
+            if (loads == 2) store->set("openai", ProviderCredential{.key = "replacement-api"});
+            return {};
+        });
+    EXPECT_THROW(providers.reasoningEfforts("openai", "model"), std::runtime_error);
+    EXPECT_THROW(providers.reasoningEfforts("openai", "model"), std::runtime_error);
+    EXPECT_TRUE(providers.reasoningEfforts("openai", "model").empty());
+    EXPECT_TRUE(providers.reasoningEfforts("openai", "model").empty());
+    EXPECT_EQ(loads, 3); // Unsupported models are cached, failed discovery is not.
+}
+
+TEST(ReasoningCapabilitiesTest, CancelledPreloadingDoesNotPoisonTheNextLookup) {
+    TempAuth temp;
+    auto store = std::make_shared<AuthStore>(temp.directory / "auth.json");
+    store->set("openai", ProviderCredential{.key = "fake-api"});
+    std::atomic<bool> cancelled{false};
+    int loads = 0;
+    ProviderConnections providers(store, temp.directory / "config.json", {}, ModelCatalog{}, ApiKeyValidator{},
+        [&](const std::string&, const std::string&) {
+            if (++loads == 1) cancelled.store(true);
+            return std::vector<std::string>{"low", "high"};
+        });
+    EXPECT_THROW(providers.reasoningEfforts("openai", "model", [&] { return cancelled.load(); }), core::Cancelled);
+    EXPECT_EQ(providers.reasoningEfforts("openai", "model"), (std::vector<std::string>{"low", "high"}));
+    providers.reasoningEfforts("openai", "model");
+    EXPECT_EQ(loads, 2);
+}
+
+TEST(ReasoningCapabilitiesTest, CoalescesConcurrentFillsAndExplicitModelDiscoveryInvalidatesLevels) {
+    TempAuth temp;
+    auto store = std::make_shared<AuthStore>(temp.directory / "auth.json");
+    store->set("openai", ProviderCredential{.key = "fake-api"});
+    AuthHttpServer server({R"({"data":[{"id":"gpt-5.4"}]})"});
+    std::atomic<int> loads{0};
+    ProviderConnections providers(store, temp.directory / "config.json", {},
+        ModelCatalog{ModelCatalogEndpoints{server.url, server.url, server.url, ""}}, ApiKeyValidator{},
+        [&](const std::string&, const std::string&) {
+            ++loads;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            return std::vector<std::string>{"low", "high"};
+        });
+    auto first = std::async(std::launch::async, [&] { return providers.reasoningEfforts("openai", "model"); });
+    auto second = std::async(std::launch::async, [&] { return providers.reasoningEfforts("openai", "model"); });
+    EXPECT_EQ(first.get(), second.get());
+    EXPECT_EQ(loads, 1);
+    EXPECT_TRUE(providers.listModels({}).errors.empty());
+    EXPECT_EQ(server.worker.get().size(), 1);
+    providers.reasoningEfforts("openai", "model");
+    EXPECT_EQ(loads, 2);
+}
+
 TEST(ModelCatalogTest, SynthesizesOnlyAdvertisedFastModelsWithoutShadowingRealSlugs) {
     const auto catalog = Json::parse(R"({"models":[
         {"slug":"current","visibility":"list","service_tiers":[{"id":"priority"}]},

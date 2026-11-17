@@ -11,6 +11,7 @@ function M.new(client, options)
     waiting = {}, permissions = {}, }, { __index = M })
   client.defer_recovery = true
   self.workflow = require('sos.workflow').new(self)
+  self.file_refresh = require('sos.file_refresh').new(self)
   local previous = client.on_event
   client.on_event = function(event)
     if previous then previous(event) end
@@ -25,6 +26,7 @@ function M:changed()
   self.client.conversation.draft = self.current.draft
   if self.inspector then self.inspector:update() end
   if self.on_change then self.on_change() end
+  require('sos.progress').update(self)
 end
 
 function M:notice(text)
@@ -61,8 +63,11 @@ function M:confirm_switch(action)
   if self.switching or self.current.pending then self:notice('Wait for the pending request'); return end
   local current = self.current
   if current.busy or (self.workflow.state and self.workflow.state.status=='running') or self.workflow.info.auto_plan_running then
-    vim.ui.select({'Keep working', 'Cancel generation and switch'}, {prompt='Switch conversation?'}, function(choice)
-      if choice == 'Cancel generation and switch' and self.current == current then action() end
+    require('sos.ui').select({'Keep working', 'Cancel generation and switch'}, {prompt='Switch conversation?'}, function(choice)
+      if choice == 'Cancel generation and switch' and self.current == current then
+        self:restore_queue(current)
+        action()
+      end
     end)
   else action() end
 end
@@ -107,7 +112,7 @@ function M:resume()
       for id, session in pairs(self.saved) do
         if id:sub(1,6) == 'draft:' then table.insert(rows, {local_id=id,label='Unsent draft: ' .. session.draft:sub(1,40)}) end
       end
-      vim.ui.select(rows, {prompt='SOS sessions',format_item=function(row) return row.label end}, function(row)
+      require('sos.ui').select(rows, {prompt='SOS sessions',format_item=function(row) return row.label end}, function(row)
         if not row then return end
         if row.local_id then
           -- Detach before exposing a local draft; never send it to the prior session.
@@ -130,6 +135,9 @@ function M:history(current)
 end
 
 function M:navigate_history(direction)
+  if self.current.pending or (self.current.history and self.current.history.optimistic) then
+    self:notice('Wait for the current request to be accepted'); return
+  end
   if self.current.kind=='review' or self.current.context_key then self:notice('Switch to Discussion or planning to navigate history'); return end
   self:history():navigate(direction)
 end
@@ -137,6 +145,7 @@ function M:older() self:navigate_history('before') end
 function M:newer() self:navigate_history('after') end
 function M:latest() self:navigate_history('latest') end
 function M:contexts() self.workflow:choose_context() end
+function M:implement() self.workflow:implement() end
 function M:plan() self.workflow:objectives(false) end
 function M:auto_plan() self.workflow:objectives(true) end
 function M:start() self.workflow:start() end
@@ -144,14 +153,26 @@ function M:retry_plan() self.workflow:auto_retry() end
 function M:implementation_plan() self.workflow:show_plan() end
 function M:generate_plan() self.workflow:generate() end
 function M:steps() self.workflow:steps() end
+function M:human_validation() self.workflow:human_validation() end
 function M:continue() self.workflow:resume() end
-function M:inspect()
-  if self.current.kind~='step' and self.workflow.selected_identity then self.workflow:select_step(self.workflow.selected_identity) end
+function M:inspection_origin()
+  local origin=require('sos.popup').origin()
+  origin.from_chat=self.panel and (origin.window==self.panel.transcript or origin.window==self.panel.input) or false
+  return origin
+end
+function M:inspect(focus,origin,identity)
+  origin=origin or self:inspection_origin()
   if not self.inspector then self.inspector=require('sos.inspection').new(self) end
-  self.inspector:show()
+  if not self.inspector:can_open(origin) then self:notice('The originating window changed. Run :SosSteps again.'); return end
+  if identity then self.workflow:select_step(identity) end
+  if self.current.kind~='review' and self.current.kind~='step' and self.workflow.selected_identity then self.workflow:select_step(self.workflow.selected_identity) end
+  self.inspector:show(focus~=false,origin)
+  if self.inspector.visible and self.current.kind=='review' and not self.workflow:readonly(self.current) then
+    self.workflow:review(self.inspector.model.index,self.inspector.model.part,false)
+  end
 end
 function M:inspection_action(action)
-  if not self.inspector or not self.inspector.visible then self:inspect() end
+  if not self.inspector or not self.inspector.visible then self:inspect(false) end
   if self.inspector and self.inspector.visible then self.inspector[action](self.inspector) end
 end
 function M:next_substep() self:inspection_action('next_substep') end
@@ -159,6 +180,7 @@ function M:previous_substep() self:inspection_action('previous_substep') end
 function M:next_change() self:inspection_action('next_change') end
 function M:previous_change() self:inspection_action('previous_change') end
 function M:explanation() self:inspection_action('toggle_explanation') end
+function M:before() self:inspection_action('toggle_before') end
 function M:review_actions()
   if not self.workflow.review_actions then self.workflow.review_actions=require('sos.review').new(self.workflow) end
   return self.workflow.review_actions
@@ -171,54 +193,116 @@ function M:reject_proposal() self:review_actions():proposal_action(false) end
 function M:revision_plan() self:review_actions():revision() end
 function M:versions() self:review_actions():versions() end
 function M:review_question()
-  local step,part=self:review_actions():selection()
-  if step then self.workflow:review(step,part) end
+  local step,part=self:review_actions():selection(true)
+  if step then
+    self.workflow:review(step,part)
+    if self.current.kind=='review' and self.panel and self.panel.input and vim.api.nvim_win_is_valid(self.panel.input) then
+      vim.api.nvim_set_current_win(self.panel.input)
+    end
+  end
 end
 
-function M:send()
+local function prepend_draft(current,text)
+  if text and text~='' then current.draft=text..(current.draft~='' and ('\n'..current.draft) or '') end
+end
+
+function M:restore_queue(current)
+  prepend_draft(current,current.queued)
+  current.queued=nil
+end
+
+function M:reject_send(current)
+  local pending=current.pending
+  if type(pending)~='table' then return end
+  self:restore_queue(current)
+  prepend_draft(current,pending.text)
+  self:history(current):reject_turn()
+  current.pending,current.busy=nil,false
+end
+
+function M:dispatch_queue(current)
+  if not current.queued then return end
+  -- Dispatch after all terminal-event projections, never into a different context.
+  vim.schedule(function()
+    if self.current~=current or current.busy or current.pending or self.switching
+      or self.client.transport.state~='ready' or self.workflow:readonly(current) then
+      self:restore_queue(current)
+      self:changed()
+      return
+    end
+    local text=current.queued
+    current.queued=nil
+    if text then self:send(text) end
+  end)
+end
+
+function M:send(queued_text)
   local current = self.current
   if current.kind=='review' or current.kind=='revision' then self.workflow:send_review(current); return end
   if self.workflow:readonly(current) then self:notice('This context is read-only; finish implementation or switch context'); return end
-  if current.busy or current.pending or self.switching then self:notice('Wait for the current operation'); return end
-  if current.draft:match('^%s*$') then return end
+  if self.switching then self:notice('Wait for the current operation'); return end
+  local text=queued_text or current.draft
+  if text:match('^%s*$') then return end
+  if current.busy or current.pending or current.queued then
+    if self.client.transport.state=='disconnected' then self:notice('Wait for the connection'); return end
+    current.queued=current.queued and (current.queued..'\n'..text) or text
+    if not queued_text then current.draft='' end
+    self:changed()
+    return
+  end
   if current.kind~='planning' and self.info and (self.info.implementation_view or (type(self.info.active_implementation_id) == 'string'
     and self.info.active_implementation_id ~= '')) then
     self:notice('Implementation conversations are not writable from this Discussion input'); return
   end
+  if self.client.transport.state=='disconnected' and self.ever_connected then
+    if queued_text then prepend_draft(current,text) end
+    self:notice('Disconnected. Use :SosReconnect; pending requests are not retried.'); return
+  end
+  local history = self:history()
+  if history.loading then
+    if queued_text then prepend_draft(current,text) end
+    self:notice('Wait for history to finish loading'); return
+  end
+  if history.page.hasNewer then
+    history:navigate('latest',function(ok)
+      if ok and self.current==current then self:send(queued_text)
+      elseif queued_text then prepend_draft(current,text) end
+    end)
+    return
+  end
+  history:purge()
+  current.permission_decision,current.notice=nil,nil
+  current.pending={text=text}
+  current.busy=true
+  if not queued_text then current.draft='' end
+  history:optimistic_turn(text,current.mode)
+  self:changed()
   self:run(function()
-    if self.current ~= current or current.pending or current.busy or self.switching then return end
-    local history = self:history()
-    if history.loading then self:notice('Wait for history to finish loading'); return end
-    if history.page.hasNewer then
-      history:navigate('latest',function(ok) if ok and self.current == current then self:send() end end)
-      return
-    end
-    history:purge()
-    current.permission_decision = nil
-    current.notice = nil
-    local text = current.draft
-    local frame = {type='message.send', text=text}
-    if not current.id then frame.workspace = current.workspace end
-    current.pending = {text=text}
-    local id = self:request(frame, current.id and 'message.accepted' or 'session.created', function(event)
-      current.pending = nil
+    if self.current~=current or not current.pending then return end
+    local frame={type='message.send',text=text}
+    if not current.id then frame.workspace=current.workspace end
+    local id=self:request(frame,current.id and 'message.accepted' or 'session.created',function(event)
       if event then
+        current.pending=nil
         if event.session then
-          current.id = event.session.id
-          self.saved[current.id] = current
+          current.id=event.session.id
+          self.saved[current.id]=current
         end
-        current.busy = true
-        if current.draft == text then current.draft = '' end
-      end
+      else self:reject_send(current) end
       self:changed()
     end)
-    if not id then current.pending = nil end
-    self:changed()
+    if not id then self:reject_send(current); self:changed() end
+  end)
+end
+
+function M:reasoning()
+  self:run(function()
+    self:request({type='reasoning.next'}, 'reasoning.updated')
   end)
 end
 
 function M:toggle_mode()
-  if self.current.kind~='discussion' or self.workflow:readonly(self.current) then
+  if (self.current.kind and self.current.kind~='discussion') or self.workflow:readonly(self.current) then
     self:notice('Mode changes are available only in editable Discussion'); return
   end
   self:run(function()
@@ -229,11 +313,12 @@ end
 function M:cancel()
   if self.workflow.archive_view or self.workflow.info.implementation_archive then self:notice('Archived implementation is read-only'); return end
   self:run(function()
-    if self.current.kind=='review' or self.current.kind=='revision' then
+    if self.current.kind=='revision' or (self.current.kind=='review' and not self.current.awaiting_selection and not self.current.building_review) then
       self:request({type='implementation.review.cancel',sessionId=self.workflow.branch_id},'implementation.updated')
       return
     end
     if self.workflow.state and self.workflow.state.status=='running' then self.workflow:cancel_construction(); return end
+    if self.current.kind=='review' then self:notice('No construction or review response is running'); return end
     -- Either acknowledgement is nonterminal for the actual generation.
     self:request({type='execution.cancel'}, 'execution.cancel_requested')
   end)
@@ -262,11 +347,20 @@ local function accept_transfer(self, event)
 end
 
 function M:event(event)
+  if event.type=='connection.closed' then
+    self:reject_send(self.current)
+    self:restore_queue(self.current)
+    for _,current in pairs(self.workflow.contexts) do
+      self:reject_send(current)
+      self:restore_queue(current)
+    end
+  end
   if event.info then
     self.info = event.info
     if event.info.workspace and not self.current.preview then self.current.workspace = event.info.workspace end
     if event.info.mode then self.current.mode = event.info.mode end
   end
+  self.file_refresh:event(event)
   for _, current in pairs(self.workflow.contexts) do
     if current.history and current.history:event(event) then return end
   end
@@ -276,7 +370,12 @@ function M:event(event)
     self.ever_connected = true
     self:request({type='integration.configure',workspace=self.launch_workspace,mode='sane'},
       'integration.configured', function(response)
-        if not response then self.waiting = {}; return end
+        if not response then
+          self.waiting={}
+          self:reject_send(self.current)
+          self:changed()
+          return
+        end
         self.configured = true
         if self.client.recovering then
           self.waiting = {}
@@ -287,6 +386,7 @@ function M:event(event)
         for _, action in ipairs(waiting) do action() end
       end)
   elseif event.type == 'connection.closed' then
+    self:history():finish()
     self:history():invalidate()
     self.configured, self.switching, self.transfer = false, false, nil
     self.current.busy, self.current.pending = false, nil
@@ -303,7 +403,12 @@ function M:event(event)
   elseif self.transfer and (event.type == 'session.history_chunk' or event.type == 'session.attached') then
     local ok, err = pcall(accept_transfer, self, event)
     if not ok then self.client.transport:stop('Invalid attachment: ' .. err); return end
-  elseif event.type == 'execution.completed' or event.type == 'execution.failed' or event.type == 'execution.cancelled' then
+  elseif (event.type == 'execution.completed' or event.type == 'execution.failed' or event.type == 'execution.cancelled')
+    and (not event.sessionId or event.sessionId==self.current.id) then
+    if event.type~='execution.completed' then
+      self:reject_send(self.current)
+      self:restore_queue(self.current)
+    end
     self.current.busy, self.current.pending = false, nil
   elseif event.type == 'permission.requested' then
     self.permissions[event.permissionId] = event
@@ -320,8 +425,9 @@ function M:event(event)
     self.current.notice = (event.error or 'Execution cancelled')
       ..(self.current.permission_decision and ('\n'..self.current.permission_decision) or '')
   end
-  if event.messages and (not event.sessionId or event.sessionId == self.current.id) then
+  if (event.messages or event.type:match('^execution%.')) and (not event.sessionId or event.sessionId == self.current.id) then
     self:history():live(event)
+    if event.type=='execution.completed' then self:dispatch_queue(self.current) end
   end
   self:changed()
 end

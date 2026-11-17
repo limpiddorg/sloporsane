@@ -64,7 +64,7 @@ function M:request(frame, terminal, callback)
   return id
 end
 
-function M:receive(frame)
+local function receive(self,frame)
   if self.state == 'connecting' then
     if frame.type ~= 'daemon.ready' or frame.protocolVersion ~= 7 then
       self:stop('Unsupported daemon handshake: expected protocol 7; update daemon and plugin together')
@@ -93,6 +93,15 @@ function M:receive(frame)
     if item.callback then item.callback(frame, frame.type == 'request.failed' and frame.error or nil) end
   end
   self:emit(frame)
+end
+
+function M:receive(frame)
+  -- State and request acknowledgements remain synchronous; UI work may coalesce.
+  local previous=self.dispatching
+  self.dispatching=true
+  local ok,err=pcall(receive,self,frame)
+  self.dispatching=previous
+  if not ok then error(err) end
 end
 
 function M:open_socket(on_failure)

@@ -8,12 +8,15 @@ vim.api.nvim_create_autocmd('ColorScheme', {
 vim.api.nvim_create_user_command('SosConnect', function() require('sos').connect() end, {})
 vim.api.nvim_create_user_command('SosReconnect', function() require('sos').session().client:reconnect() end, {})
 vim.api.nvim_create_user_command('SosDisconnect', function() require('sos').disconnect() end, {})
-local actions = {New='new_session',Resume='resume',Toggle='toggle',Send='send',Cancel='cancel',Mode='toggle_mode',
-   Older='older',Newer='newer',Latest='latest',Context='contexts',Plan='plan',AutoPlan='auto_plan',
+vim.api.nvim_create_user_command('SosPermissions', function() require('sos.actions').permission(require('sos').session()) end, {})
+vim.keymap.set('n', '<Plug>(SosPermissions)', '<Cmd>SosPermissions<CR>', {silent=true})
+local actions = {New='new_session',Resume='resume',Toggle='toggle',Send='send',Cancel='cancel',Mode='toggle_mode',Reasoning='reasoning',
+   Older='older',Newer='newer',Latest='latest',Context='contexts',Implement='implement',Plan='plan',AutoPlan='auto_plan',
    Start='start',RetryPlan='retry_plan',ImplementationPlan='implementation_plan',GeneratePlan='generate_plan',
    Steps='steps',Continue='continue',Inspect='inspect',NextSubstep='next_substep',PreviousSubstep='previous_substep',
-   NextChange='next_change',PreviousChange='previous_change',Explanation='explanation',Indicator='indicator',Validate='validate',
-   Review='review_question',Proposal='proposal',AcceptProposal='accept_proposal',RejectProposal='reject_proposal',
+     NextChange='next_change',PreviousChange='previous_change',Explanation='explanation',Explanations='explanation',Indicator='indicator',Validate='validate',
+    NextDiff='next_change',PreviousDiff='previous_change',
+    Before='before',Review='review_question',Proposal='proposal',AcceptProposal='accept_proposal',RejectProposal='reject_proposal',
    Revision='revision_plan',Versions='versions'}
 for name, action in pairs(actions) do
   local run = function() require('sos').action(action) end

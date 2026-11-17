@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.20)
 
 project(sloporsane LANGUAGES C CXX)
 
+set(SOS_VERSION "dev" CACHE STRING "SOS release version, or dev to disable update checks")
+if(NOT SOS_VERSION MATCHES "^(dev|v?[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?)$")
+    message(FATAL_ERROR "SOS_VERSION must be dev or a release version such as v0.0.1")
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

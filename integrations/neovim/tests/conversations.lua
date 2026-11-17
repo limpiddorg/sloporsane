@@ -45,9 +45,9 @@ assert(not session.current.busy)
 session:set_draft('accepted draft'); session:changed(); session:send()
 client:reply({type='message.accepted',requestId='2'})
 assert(session.current.draft == '')
-local choose = vim.ui.select
+local choose = require('sos.ui').select
 local selected
-vim.ui.select = function(rows, _, callback) selected={rows=rows,callback=callback} end
+require('sos.ui').select = function(rows, _, callback) selected={rows=rows,callback=callback} end
 session:new_session()
 assert(#client.sent == 2 and selected)
 selected.callback(selected.rows[1]) -- Keep working
@@ -125,10 +125,26 @@ assert(#client.sent == count_before + 1)
 Actions.model(session)
 local mid = client.sent[#client.sent].id
 client:reply({type='model.listed',requestId=mid,models={{provider='test',model='local',max_context=vim.NIL}}})
-local oldinput = vim.ui.input
-vim.ui.input = function(_, callback) callback('32768') end
+local oldinput = require('sos.ui').input
+require('sos.ui').input = function(_, callback) callback('32768') end
 selected.callback(selected.rows[1])
 assert(client.sent[#client.sent].frame.type == 'model.select')
-vim.ui.input, vim.ui.select = oldinput, choose
+require('sos.ui').input, require('sos.ui').select = oldinput, choose
+
+-- Direct thinking changes preserve the draft and wait for daemon metadata.
+session:set_draft('keep this draft')
+session.info.reasoning='high'
+session:reasoning()
+local thinking=client.sent[#client.sent]
+assert(thinking.frame.type=='reasoning.next' and thinking.terminal=='reasoning.updated')
+assert(session.current.draft=='keep this draft' and session.info.reasoning=='high')
+client:reply({type='request.failed',requestId=thinking.id,error='Thinking locked'})
+assert(session.current.draft=='keep this draft' and session.info.reasoning=='high')
+session:reasoning()
+client:reply({type='reasoning.updated',requestId=client.sent[#client.sent].id,info={reasoning='low'}})
+assert(session.current.draft=='keep this draft' and session.info.reasoning=='low')
+session:set_draft('/reasoning')
+Actions.slash(session)
+assert(client.sent[#client.sent].frame.type=='reasoning.next' and session.current.draft=='')
 panel:hide()
 print('Native session/panel/action tests passed')

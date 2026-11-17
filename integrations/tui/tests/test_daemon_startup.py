@@ -146,6 +146,11 @@ class DaemonStartupTest(unittest.IsolatedAsyncioTestCase):
         path.write_text(json.dumps({provider: {"type": "api", "method": "api", "key": "fake-" + provider}
                                     for provider in ("openai", "openrouter")}))
         path.chmod(0o600)
+        # Startup now preloads capabilities. Use locally known API levels rather
+        # than sending these fixture credentials to the default OpenRouter catalog.
+        config = self.root / "config/sos/config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text(json.dumps({"provider": "openai", "model": "gpt-5", "reasoning": "high"}))
         with patch("sos_tui.daemon_startup.BUNDLED_DAEMON", DAEMON):
             client = self.client()
             await client.connect()

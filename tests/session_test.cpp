@@ -5214,6 +5214,85 @@ TEST_F(SessionTest, PreviewReadsLatestUserRequestWithoutLoadingOrChangingHistory
     EXPECT_THROW(registry.lastUserMessage("../other"), std::invalid_argument);
 }
 
+TEST_F(SessionTest, PrefetchesReasoningWithoutBlockingStartupOrModelSelectionAndSharesTheFirstShortcut) {
+    asio::io_context io;
+    SessionRegistry registry(directory / "sessions", factory());
+    auto auth = std::make_shared<AuthStore>(directory / "auth.json");
+    auth->set("openai", ProviderCredential{.key = "fake-key"});
+    std::promise<void> startupEntered, modelEntered, releaseStartup, releaseModel;
+    auto startupReady = startupEntered.get_future();
+    auto modelReady = modelEntered.get_future();
+    auto startupRelease = releaseStartup.get_future().share();
+    auto modelRelease = releaseModel.get_future().share();
+    std::atomic<int> startupLoads{0}, modelLoads{0};
+    auto providers = std::make_shared<ProviderConnections>(auth, directory / "config.json",
+        ProviderConnections::OAuthStarter{}, ModelCatalog{}, ApiKeyValidator{},
+        [&](const std::string& provider, const std::string& model) {
+            EXPECT_EQ(provider, "openai");
+            if (model == "startup-model") {
+                if (++startupLoads == 1) startupEntered.set_value();
+                if (startupRelease.wait_for(std::chrono::seconds(3)) != std::future_status::ready)
+                    throw std::runtime_error("Startup fixture was not released");
+            } else {
+                EXPECT_EQ(model, "selected-model");
+                if (++modelLoads == 1) modelEntered.set_value();
+                if (modelRelease.wait_for(std::chrono::seconds(3)) != std::future_status::ready)
+                    throw std::runtime_error("Model fixture was not released");
+            }
+            return std::vector<std::string>{"low", "high"};
+        });
+    providers->select({"openai", "startup-model", "high"});
+    ServerSocket server(io, directory / "prefetch.sock");
+    server.listen();
+    asio::local::stream_protocol::socket socket(io);
+    socket.connect(asio::local::stream_protocol::endpoint((directory / "prefetch.sock").string()));
+    ConnectionSocket client(std::move(socket));
+    std::shared_ptr<Integration> integration;
+    auto run = asio::co_spawn(io, [&]() -> asio::awaitable<void> {
+        integration = std::make_shared<Integration>(io, co_await server.accept(), registry,
+            SessionTitleGenerator{}, Integration::ReasoningEffortsLoader{}, IntegrationHealthSettings{}, providers);
+        co_await integration->run();
+    }, asio::use_future);
+    auto interaction = asio::co_spawn(io, [&]() -> asio::awaitable<void> {
+        const auto ready = co_await client.receive();
+        EXPECT_EQ(ready->at("type"), "daemon.ready");
+        co_await awaitFuture(startupReady);
+        EXPECT_EQ(startupLoads, 1);
+        co_await client.send({{"type", "model.select"}, {"provider", "openai"}, {"model", "selected-model"}});
+        const auto selected = co_await client.receive();
+        EXPECT_EQ(selected->at("type"), "model.selected");
+        EXPECT_EQ(selected->at("info").at("reasoning"), "high");
+        co_await awaitFuture(modelReady); // A new model is not serialized behind the old network request.
+        co_await client.send({{"type", "session.list"}});
+        EXPECT_EQ((co_await client.receive())->at("type"), "session.listed");
+        co_await client.send({{"type", "reasoning.next"}, {"requestId", "first"}});
+        asio::steady_timer timer(io, std::chrono::milliseconds(20));
+        co_await timer.async_wait(asio::use_awaitable);
+        EXPECT_EQ(modelLoads, 1); // The shortcut joins the speculative fill, rather than fetching again.
+        releaseModel.set_value();
+        const auto updated = co_await client.receive();
+        EXPECT_EQ(updated->at("type"), "reasoning.updated");
+        EXPECT_EQ(updated->at("info").at("model"), "selected-model");
+        EXPECT_EQ(updated->at("info").at("reasoning"), "low");
+        releaseStartup.set_value();
+        co_await client.send({{"type", "reasoning.next"}});
+        EXPECT_EQ((co_await client.receive())->at("info").at("reasoning"), "high");
+        EXPECT_EQ(modelLoads, 1);
+        EXPECT_EQ(startupLoads, 1);
+        EXPECT_TRUE(registry.list().empty());
+        client.close();
+    }, asio::use_future);
+    io.run_for(std::chrono::seconds(4));
+    client.close();
+    if (integration) integration->close();
+    io.restart();
+    io.run_for(std::chrono::seconds(1));
+    ASSERT_EQ(interaction.wait_for(std::chrono::seconds(0)), std::future_status::ready);
+    interaction.get();
+    ASSERT_EQ(run.wait_for(std::chrono::seconds(0)), std::future_status::ready);
+    run.get();
+}
+
 TEST_F(SessionTest, CyclesReasoningBeforeCreationAndPersistsSelectionForFollowingTurns) {
     asio::io_context io;
     SessionRegistry registry(directory / "sessions", factory());
@@ -5226,13 +5305,21 @@ TEST_F(SessionTest, CyclesReasoningBeforeCreationAndPersistsSelectionForFollowin
     std::string id;
     std::string selected = daemon_config::DEFAULT_REASONING_EFFORT;
     bool unavailable = false;
+    int reasoningLoads = 0;
+    auto auth = std::make_shared<AuthStore>(directory / "auth.json");
+    auth->set("openrouter", ProviderCredential{.key = "fake-key"});
+    auto providers = std::make_shared<ProviderConnections>(auth, directory / "config.json",
+        ProviderConnections::OAuthStarter{}, ModelCatalog{}, ApiKeyValidator{},
+        [&](const std::string& provider, const std::string& model) {
+            EXPECT_EQ(provider, "openrouter");
+            EXPECT_EQ(model, daemon_config::DEFAULT_MODEL);
+            ++reasoningLoads;
+            return unavailable ? std::vector<std::string>{} : std::vector<std::string>{"none", "low", "high"};
+        });
     auto run = asio::co_spawn(io, [&]() -> asio::awaitable<void> {
         integration = std::make_shared<Integration>(io, co_await server.accept(), registry,
             [](const std::string&, const std::string&, core::CancellationCheck) { return "Reasoning selection"; },
-            [&](const std::string& model) {
-                EXPECT_EQ(model, daemon_config::DEFAULT_MODEL);
-                return unavailable ? std::vector<std::string>{} : std::vector<std::string>{"none", "low", "high"};
-            });
+            Integration::ReasoningEffortsLoader{}, IntegrationHealthSettings{}, providers);
         co_await integration->run();
     }, asio::use_future);
     auto interaction = asio::co_spawn(io, [&]() -> asio::awaitable<void> {
@@ -5246,6 +5333,7 @@ TEST_F(SessionTest, CyclesReasoningBeforeCreationAndPersistsSelectionForFollowin
             EXPECT_EQ(updated->at("info").at("reasoning"), selected);
             EXPECT_TRUE(registry.list().empty());
         }
+        EXPECT_EQ(reasoningLoads, 1);
         co_await client.send({{"type", "message.send"}, {"text", "First"}, {"workspace", directory.string()}});
         const auto created = co_await client.receive();
         EXPECT_EQ(created->at("session").at("reasoning"), selected);
@@ -5261,11 +5349,14 @@ TEST_F(SessionTest, CyclesReasoningBeforeCreationAndPersistsSelectionForFollowin
         const auto updated = co_await client.receive();
         selected = selected == "none" ? "low" : selected == "low" ? "high" : "none";
         EXPECT_EQ(updated->at("info").at("reasoning"), selected);
+        EXPECT_EQ(reasoningLoads, 1);
         unavailable = true;
+        auth->set("openrouter", ProviderCredential{.key = "replacement-key"});
         co_await client.send({{"type", "reasoning.next"}});
         const auto failed = co_await client.receive();
         EXPECT_EQ(failed->at("type"), "request.failed");
         EXPECT_EQ(failed->at("info").at("reasoning"), selected);
+        EXPECT_EQ(reasoningLoads, 2);
         co_await client.send({{"type", "message.send"}, {"text", "Next"}});
         for (;;) {
             const auto event = co_await client.receive();

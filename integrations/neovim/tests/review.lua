@@ -16,9 +16,9 @@ w.state={revision=3,status='completed',review_step=0,plan={steps={{title='First'
   steps={{identity='first',generation=1,substeps={{complete=true,reviewed=false,diffs={}}},whole={complete=true,reviewed=false,diffs={}}}}}
 w:review(0,0)
 local review=s:review_actions()
-local select=vim.ui.select
+local select=require('sos.ui').select
 local held,prompt
-vim.ui.select=function(rows,options,callback) held=function() callback(rows[2]) end; prompt=options.prompt end
+require('sos.ui').select=function(rows,options,callback) held=function() callback(rows[2]) end; prompt=options.prompt end
 s:indicator(); local id=tostring(#client.sent)
 assert(client.sent[tonumber(id)].frame.substep==0 and client.sent[tonumber(id)].frame.revision==3)
 local count=#client.sent; s:indicator(); assert(#client.sent==count)
@@ -74,5 +74,5 @@ client.on_event({type='implementation.updated',sessionId='branch',implementation
 assert(w.state.status=='archived' and w.live_state.revision==6)
 review:live(); assert(w.state.revision==6 and not w.archive_view)
 if s.inspector then s.inspector:hide() end
-vim.ui.select=select
+require('sos.ui').select=select
 print('Revision-safe review/import/proposal/archive tests passed')

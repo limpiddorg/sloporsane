@@ -1,5 +1,5 @@
 -- Controlled-provider real daemon scenario; launched by smoke.py --lifecycle.
-vim.opt.runtimepath:prepend(vim.fn.getcwd()..'/integrations/neovim')
+vim.opt.runtimepath:prepend(vim.env.SOS_TEST_RUNTIME or vim.fn.getcwd()..'/integrations/neovim')
 local ok,err=xpcall(function()
   local client=require('sos.client').new({socket=vim.env.SOS_TEST_SOCKET,auto_start=false,timeout_ms=10000})
   local events={}
@@ -22,22 +22,43 @@ local ok,err=xpcall(function()
     assert(s:request(frame,terminal,function(event,error) response,failure,done=event,error,true end))
     wait(function() return done end); assert(response,failure); return response
   end
-  vim.ui.select=function(rows,_,callback)
+  local automatic=vim.env.SOS_TEST_AUTO_PLAN=='1'
+  require('sos.ui').select=function(rows,options,callback)
+    if rows[1]=='Implementation plan' then callback(rows[automatic and 2 or 1]); return end
+    if options.prompt=='Implementation pace' then callback(rows[vim.env.SOS_TEST_PACE=='everything' and 2 or 1]); return end
     for _,row in ipairs(rows) do if type(row)=='table' and row.decision=='yes' then callback(row); return end end
     callback(rows[2] or rows[1])
   end
   client:connect(); wait(function() return s.configured end)
+  local panel=require('sos.panel').new(s); panel:show()
   local provider=command({type='provider.create',name='Lifecycle fixture',base_url=vim.env.SOS_TEST_URL},'provider.listed').created_provider
   command({type='provider.select',provider=provider},'provider.selected')
   command({type='model.list'},'model.listed')
   command({type='model.select',provider=provider,model='local-model',context_limit=65536},'model.selected')
+  local original_buffer=vim.fn.bufadd(vim.env.SOS_TEST_WORKSPACE..'/state.txt')
+  vim.fn.bufload(original_buffer)
+  vim.bo[original_buffer].autoread=true
   s:set_draft('Build the controlled fixture'); s:send()
   wait(function() return s.current.id and not s.current.pending and not s.current.busy and #(w.info.objective_plans or {})>0 end)
-  local objective=w.info.objective_plans[1]
-  w:open_objective(objective,false)
-  wait(function() return w.branch_id and not s.switching and w.info.implementation_plan_ready and not s.current.busy end)
-  command({type='implementation.start',sessionId=w.branch_id,pace='step_by_step'},'implementation.updated')
+  local discussion=s.current
+  discussion.draft='Retained Discussion draft'
+  local records=discussion.records
+  s:implement()
+  if not automatic then
+    wait(function() return w.branch_id and not s.switching and w.info.implementation_plan_ready and not s.current.busy end)
+    s:implementation_plan()
+    assert(s.current.kind=='plan','Finalized manual plan could not be read before validation')
+    s:implement()
+  end
   wait(function() return w.state and w.state.steps[1].whole.complete end)
+  assert(s.current.kind=='review' and panel.transcript and panel.input and not vim.bo[s.current.view.input].modifiable and not w.selector,
+    'Real acknowledged construction did not open the locked review chat')
+  assert(w.state.pace==(vim.env.SOS_TEST_PACE or 'step_by_step'))
+  local implementation=s.current
+  w:discussion()
+  assert(s.current==implementation,'Discussion became selectable during implementation')
+  assert(w.contexts[discussion.id]==discussion and discussion.records==records and discussion.draft=='Retained Discussion draft',
+    'Entering Implement discarded the Discussion history or draft')
   local path=vim.env.SOS_TEST_WORKSPACE..'/state.txt'
   local function original() return table.concat(vim.fn.readfile(path),'\n')..'\n' end
   assert(original()=='original\n','Construction leaked into the original workspace')
@@ -68,7 +89,14 @@ local ok,err=xpcall(function()
   s:validate()
   wait(function() return w.state.steps[1].whole.reviewed and not s:review_actions().pending end)
   assert(original()=='corrected\n','Explicit final validation did not import corrected evidence')
-  s.inspector:hide(); client:close()
+  wait(function() return not s.file_refresh.scheduled end)
+  assert(vim.api.nvim_buf_get_lines(original_buffer,0,-1,false)[1]=='corrected','Successful import did not refresh the original file buffer')
+   assert(s.current.kind=='conclusion' and not panel.input,'Final validation did not open Conclusion')
+   w:discussion()
+   wait(function() return s.current.kind=='discussion' and not s.switching and not w.branch_id end)
+   assert(s.current.draft=='Retained Discussion draft' and panel.input and not w.selector,
+     'Closing did not restore the preserved Discussion and its composer')
+   s.inspector:hide(); panel:hide(); client:close()
 end,debug.traceback)
 if not ok then io.stderr:write(err..'\n'); vim.cmd('cquit 1') end
 print('Real-daemon planning/construction/inspection/correction/import passed')

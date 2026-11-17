@@ -1,9 +1,5 @@
 find_program(UV_EXECUTABLE NAMES uv REQUIRED)
 
-set(SOS_VERSION "dev" CACHE STRING "SOS release version, or dev to disable update checks")
-if(NOT SOS_VERSION MATCHES "^(dev|v?[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?)$")
-    message(FATAL_ERROR "SOS_VERSION must be dev or a release version such as v0.0.1")
-endif()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/VERSION" CONTENT "@SOS_VERSION@\n" @ONLY)
 
 set(TUI_SOURCE_DIR "${PROJECT_SOURCE_DIR}/integrations/tui")
