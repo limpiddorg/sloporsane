@@ -20,11 +20,30 @@ function M.new(session)
   end
   local group=api.nvim_create_augroup('SosComposer'..tostring(vim.uv.hrtime()),{clear=true})
   api.nvim_create_autocmd('WinResized',{group=group,callback=function() self:queue_render() end})
-  api.nvim_create_autocmd('WinClosed',{group=group,callback=function(event)
-    local closed=tonumber(event.match)
-    if closed~=self.input and closed~=self.transcript then return end
+  api.nvim_create_autocmd({'WinClosed','BufDelete','BufWipeout'},{group=group,callback=function(event)
+    local window=event.event=='WinClosed'
+    local closed=window and tonumber(event.match) or event.buf
+    local function matches(win,buf) return closed==(window and win or (not window and buf)) end
+    local view=self.displayed and self.displayed.view or {}
+    local inspector=session.inspector
+    local selector=session.workflow.selector
+    local popup=selector and selector.popup
+    local surface=self.build_surface
+    local footer=inspector and inspector.header_surface
+    local function surface_matches(item)
+      return item and not item.closed and (matches(item.window,item.buffer) or matches(item.float,item.display))
+    end
+    local function owned()
+      return matches(self.input,view.input) or matches(self.transcript,view.transcript)
+        or surface_matches(surface) and surface==self.build_surface
+        or inspector and inspector.visible and (matches(inspector.code,inspector.code_buffer)
+          or matches(inspector.explanation,inspector.explanation_buffer)
+          or surface_matches(footer) and footer==inspector.header_surface)
+        or popup and not popup.closed and (matches(popup.window,popup.buffer) or matches(popup.preview_window,popup.preview_buffer))
+    end
+    if not (self.input or self.transcript) or not owned() then return end
     local input,transcript=self.input,self.transcript
-    -- Window teardown must finish before closing the remaining sidebar split.
+    -- Let Neovim finish teardown before closing the rest of the SOS layout.
     vim.schedule(function()
       if self.input==input and self.transcript==transcript then self:hide() end
     end)
@@ -156,17 +175,18 @@ end
 function M:hide()
   self.render_pending=false
   self:save_view()
+  require('sos.progress').close(self.session)
   local view=self.displayed and self.displayed.view
   local input,transcript=self.input,self.transcript
   local excluded={}
   for _,win in pairs({input=input,transcript=transcript,navigation=(self.session.workflow.selector or {}).window}) do excluded[win]=true end
   local sizes=Layout.heights(excluded)
   self.input, self.transcript = nil, nil
-  if self.session.workflow.selector then self.session.workflow.selector:close(); self.session.workflow.selector=nil end
+  self.session.workflow:close_steps()
+  if self.session.inspector and self.session.inspector.visible then self.session.inspector:hide() end
   if view and valid(input) and api.nvim_win_get_buf(input)==view.input then api.nvim_win_close(input, true) end
   if view and valid(transcript) and api.nvim_win_get_buf(transcript)==view.transcript then api.nvim_win_close(transcript, true) end
   Layout.restore_heights(sizes)
-  require('sos.progress').update(self.session)
 end
 
 function M:show()
@@ -222,6 +242,7 @@ function M:toggle()
   self:show()
   if valid(self.input) then api.nvim_set_current_win(self.input)
   elseif valid(self.transcript) then api.nvim_set_current_win(self.transcript) end
+  self.session.workflow:steps(true)
 end
 
 function M:sync_composer(current)

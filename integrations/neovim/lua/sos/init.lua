@@ -57,11 +57,6 @@ end
 function M.client()
   if not client then
     client = require('sos.client').new(M.options)
-    client.on_event = function(event)
-      if event.type == 'connection.closed' and event.error ~= 'Connection closed by user' then
-        vim.notify('SOS: ' .. event.error, vim.log.levels.ERROR)
-      end
-    end
   end
   return client
 end

@@ -16,13 +16,17 @@ end
 function M:configure(buffer)
   self.buffers[buffer] = true
   for key, action in pairs({[']s']='next_substep', ['[s']='previous_substep', [']c']='next_change', ['[c']='previous_change',
-    ['gx']='toggle_explanation', ['gb']='toggle_before', ['q']='hide'}) do
+    ['gx']='toggle_explanation', ['gb']='toggle_before', ['q']='close_layout'}) do
     vim.keymap.set('n', key, function() self[action](self) end, {buffer=buffer, silent=true})
   end
   vim.bo[buffer].swapfile = false
   vim.bo[buffer].modeline = false
   vim.bo[buffer].readonly = true
   vim.bo[buffer].modifiable = false
+end
+function M:close_layout()
+  local panel=self.session.panel
+  if panel and valid(panel.transcript) then panel:hide() else self:hide() end
 end
 function M:buffer(kind)
   local buffer = api.nvim_create_buf(false, true)
@@ -107,25 +111,22 @@ function M:windows()
     vim.wo[self.code].statusline = ' '
   end
   if not owned(self.header,self.header_buffer) then
-    if not self.header_buffer or not api.nvim_buf_is_valid(self.header_buffer) then self.header_buffer=self:buffer('header') end
-    api.nvim_win_call(self.code,function()
-      vim.cmd('aboveleft 2split')
-      self.header=api.nvim_get_current_win()
-      api.nvim_win_set_buf(self.header,self.header_buffer)
-    end)
-    self:plain_window(self.header)
-    vim.wo[self.header].winfixheight=true
+    require('sos.surface').close(self.header_surface)
+    self.header_surface=require('sos.surface').new(self.code,'belowright',2)
+    self.header,self.header_buffer=self.header_surface.window,self.header_surface.buffer
   end
   if not self.collapsed and not owned(self.explanation, self.explanation_buffer) then
     if not self.explanation_buffer or not api.nvim_buf_is_valid(self.explanation_buffer) then
       self.explanation_buffer = self:buffer('explanation')
     end
-    api.nvim_win_call(self.header, function()
-      vim.cmd('aboveleft 5split')
+    api.nvim_win_call(self.code, function()
+      vim.cmd('aboveleft 3split')
       self.explanation = api.nvim_get_current_win()
       api.nvim_win_set_buf(self.explanation, self.explanation_buffer)
     end)
     self:plain_window(self.explanation)
+    vim.wo[self.explanation].winfixheight=true
+    api.nvim_win_set_height(self.explanation,3)
     vim.wo[self.explanation].wrap=true
     vim.bo[self.explanation_buffer].syntax = 'markdown'
   end
@@ -149,7 +150,8 @@ function M:hide()
     [owned(self.explanation,self.explanation_buffer) and self.explanation or -1]=true})
   self.visible = false
   if owned(self.explanation,self.explanation_buffer) then api.nvim_win_close(self.explanation,true) end
-  if owned(self.header,self.header_buffer) then api.nvim_win_close(self.header,true) end
+  require('sos.surface').close(self.header_surface)
+  self.header_surface=nil
   if owned(self.code,self.code_buffer) then
     if self.borrowed and self.borrowed.window==self.code then
       local previous=self.borrowed
@@ -176,7 +178,9 @@ end
 function M:toggle_explanation()
   self.collapsed = not self.collapsed
   if self.collapsed and owned(self.explanation, self.explanation_buffer) then
-    api.nvim_win_close(self.explanation, true); self.explanation=nil
+    local win=self.explanation
+    self.explanation=nil
+    api.nvim_win_close(win,true)
   end
   self:windows(); self:render(true)
 end
@@ -247,7 +251,7 @@ function M:render(preserve_view)
   vim.bo[buffer].modifiable=false
   local heading=model:heading()
   if owned(self.header,self.header_buffer) then
-    self:put(self.header_buffer,{heading,selected and selected.path:gsub('[\r\n]',' ') or 'No changes'})
+    require('sos.surface').put(self.header_surface,{heading,selected and selected.path:gsub('[\r\n]',' ') or 'No changes'})
     api.nvim_win_set_height(self.header,2)
   end
   if owned(self.explanation, self.explanation_buffer) then

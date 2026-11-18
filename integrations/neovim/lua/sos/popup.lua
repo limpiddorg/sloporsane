@@ -25,13 +25,12 @@ function M:layout()
   end
   if valid(self.preview_window) then
     local span=math.max(2,math.min(140,math.floor(vim.o.columns*.9),vim.o.columns-5))
-    local left=math.max(1,math.floor(span*.55))
-    width=math.max(1,span-left)
+    width=math.max(1,math.floor(span*.45))
+    local right=math.max(1,span-width)
     col=math.max(0,math.floor((vim.o.columns-span-5)/2))
     height=math.max(1,math.min(math.max(self.height,math.floor(available*.65)),available-2))
     row=math.max(0,math.floor((available-height-2)/2))
-    api.nvim_win_set_config(self.preview_window,config('Substeps',row,height,col,left))
-    col=col+left+3
+    api.nvim_win_set_config(self.preview_window,config('Substeps',row,height,col+width+3,right))
   end
   if valid(self.prompt_window) then
     api.nvim_win_set_config(self.prompt_window,config(self.title,row,1))

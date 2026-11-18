@@ -1,6 +1,6 @@
 local M = {}
 local commands = {'/help','/new','/resume','/mode','/cancel','/model','/reasoning','/permissions',
-  '/context','/plan','/auto_plan','/start','/retry_plan','/implementation_plan','/generate_plan','/steps','/continue',
+  '/context','/plan','/auto_plan','/start','/retry_plan','/implementation_plan','/generate_plan','/continue',
   '/inspect','/review','/indicator','/validate','/proposal','/accept_proposal','/reject_proposal','/revision','/versions'}
 
 function M.complete(findstart, base)
@@ -47,7 +47,7 @@ function M.permission(session)
   session:notice('Permission required: ' .. request.tool .. '\n' .. vim.inspect({
     permission=request.permission,patterns=request.patterns,always=request.always,
     details=request.details,arguments=request.arguments,working_directory=request.working_directory,
-  }))
+  }), 'permission')
   local choices = {{label='Deny and cancel execution',decision='no'},{label='Allow once',decision='yes'}}
   if request.always and #request.always > 0 then
     table.insert(choices,{label='Always allow displayed scopes for this connection',decision='always'})
@@ -57,7 +57,7 @@ function M.permission(session)
     if session.permissions[id] ~= request then return end
     session.permission_prompt = nil
     if not row then
-      session:notice('Permission still pending for '..request.tool..'. Use :SosPermissions to reopen from any context; no permission was granted.')
+      session:notice('Permission still pending for '..request.tool..'. Use :SosPermissions to reopen from any context; no permission was granted.','info')
       return
     end
     if session.permissions[id].pending then return end
@@ -81,14 +81,14 @@ function M.slash(session)
   -- Consume only the command; later typed text remains an independent draft.
   session:set_draft('')
   if command == '/help' then
-    session:notice('Supported: ' .. table.concat(commands, ', ') .. '. Use :SosSend explicitly; Insert mode edits, Normal mode reads.')
+    session:notice('Supported: ' .. table.concat(commands, ', ') .. '. Use :SosSend explicitly; Insert mode edits, Normal mode reads.','info')
   elseif command == '/model' then M.model(session)
   elseif command == '/reasoning' then session:reasoning()
   elseif command == '/permissions' then M.permission(session)
   else
     local action = ({['/new']='new_session',['/resume']='resume',['/mode']='toggle_mode',['/cancel']='cancel',
       ['/context']='contexts',['/plan']='plan',['/auto_plan']='auto_plan',['/start']='start',['/retry_plan']='retry_plan',
-      ['/implementation_plan']='implementation_plan',['/generate_plan']='generate_plan',['/steps']='steps',['/continue']='continue',
+       ['/implementation_plan']='implementation_plan',['/generate_plan']='generate_plan',['/continue']='continue',
       ['/inspect']='inspect',['/review']='review_question',['/indicator']='indicator',['/validate']='validate',
       ['/proposal']='proposal',['/accept_proposal']='accept_proposal',['/reject_proposal']='reject_proposal',
       ['/revision']='revision_plan',['/versions']='versions'})[command]

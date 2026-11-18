@@ -51,8 +51,9 @@ local ok,err=xpcall(function()
     s:implement()
   end
   wait(function() return w.state and w.state.steps[1].whole.complete end)
-  assert(s.current.kind=='review' and panel.transcript and panel.input and not vim.bo[s.current.view.input].modifiable and not w.selector,
-    'Real acknowledged construction did not open the locked review chat')
+   assert(s.current.kind=='review' and panel.transcript and panel.input and not vim.bo[s.current.view.input].modifiable
+     and w.selector and w.selector:visible(), 'Acknowledged construction did not open the locked review chat and step selector')
+   w.selector:close()
   assert(w.state.pace==(vim.env.SOS_TEST_PACE or 'step_by_step'))
   local implementation=s.current
   w:discussion()

@@ -100,7 +100,7 @@ function M:proposal()
   end
   w.contexts[current.context_key]=current; w:select(current)
   w.session:notice(state.revision_planning and 'Candidate plan · :SosRevision · :SosAcceptProposal to execute · :SosRejectProposal'
-    or 'Proposal · :SosAcceptProposal / :SosRejectProposal')
+    or 'Proposal · :SosAcceptProposal / :SosRejectProposal','info')
 end
 
 function M:proposal_action(accept)

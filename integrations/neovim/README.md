@@ -198,12 +198,20 @@ During construction it shows a spinner and:
 
 ```text
 Building step 1 |
-:SosSteps to select a step to review
+Reopen SOS to select a step to review
 ```
 
-`:SosSteps` opens a floating selector containing only steps. Moving the selection
-updates a read-only frame on its left with that step's numbered substeps and
-preserved explanations, without changing the open inspection or review context.
+The floating step selector opens when the first implementation result state is
+received in an open SOS panel, and when `:SosToggle` reopens a step or review
+view. It closes when leaving the implementation view and does not select a step
+on its own. There is no separate step-selector command.
+Closing a SOS pane closes the other SOS panes, just like hiding with `:SosToggle`;
+this preserves the current conversation and draft.
+Moving the selection
+updates a read-only frame on its right with that step's numbered substeps and
+preserved explanations, rendered with SOS Markdown highlight groups. The left
+frame's title follows the selected step. Browsing changes neither the open
+inspection nor the review context.
 Ctrl-D / Ctrl-U scroll the preview while the selection stays on the step list.
 Enter selects a step, switches to its
 independent review history, and opens its preserved code and explanation. The
@@ -217,16 +225,18 @@ selector without opening code. Selection uses the original window, not the popup
 
 Use `:SosVersions`, `:SosImplementationPlan` and `:SosProposal` for their separate
 views; Conclusion opens after final validation. Live updates preserve the selector's
-cursor and focus. It is opened only on request, not as a permanent
-sidebar. Selected code and review drafts remain stable while other steps build.
+cursor and focus. It is a temporary popup, not a permanent sidebar. Selected
+code and review drafts remain stable while other steps build.
 Review input becomes editable only on the first built, unvalidated step; future,
 interrupted, superseded and archived results remain inspectable but read-only.
-An upper-left nonfocusable progress indicator appears only when the chat is hidden;
-set `progress = false` to disable it. `:SosContinue` confirms resuming an
+A nonfocusable progress row appears only below the composer, showing actual
+construction independently of inspection selection, for example
+`Step 1/2 · Substep 2/3 · Building`.
+Set `progress = false` to disable these indicators. `:SosContinue` confirms resuming an
 interrupted build; `:SosCancel` confirms interrupting construction, or cancels the
 selected review independently. These controls have matching `<Plug>` actions and
 slash forms `/context`, `/plan`, `/generate_plan`, `/implementation_plan`, `/start`,
-`/auto_plan`, `/retry_plan`, `/steps` and `/continue`. Review selection and questions
+`/auto_plan`, `/retry_plan` and `/continue`. Review selection and questions
 do not validate or import changes.
 
 ## Review and import
@@ -243,6 +253,9 @@ confirms importing into the original workspace, including how many unchecked
 indicators will be accepted. No selection or review advancement is assumed until
 the daemon confirms the current revision. Import conflicts and stale revisions
 retain the selection and evidence; read the error before retrying.
+Command and runtime failures appear in Neovim's message area and `:messages`,
+not in the conversation transcript. Informational messages are not styled as
+errors. Permission details remain in the chat alongside the decision prompt.
 While an import is pending, the review input displays Applying changes and prevents
 double submission. Only its correlated successful acknowledgement selects the
 successor's review context and construction status. After the
@@ -276,7 +289,7 @@ default mappings. Editable composers also support `/inspect`, `/review`,
 `/indicator`, `/validate`, `/proposal`, `/accept_proposal`, `/reject_proposal`,
 `/revision` and `/versions`. Read-only views use Ex commands rather than input.
 
-Selecting a step in `:SosSteps`, or using `:SosInspect`, opens native inspection
+Selecting a step in the automatic selector, or using `:SosInspect`, opens native inspection
 using the originating window rules above. It restores the last substep/diff, or
 the first changed substep initially. Incomplete or empty boundaries show No changes.
 No second substep picker, quickfix or location list is required.
@@ -289,21 +302,23 @@ the selected file/hunk when new changes arrive. `:SosNextDiff` / `:SosPreviousDi
 are aliases of the Change commands, with matching `<Plug>` actions.
 Matching `<Plug>` actions are available. Inside owned inspection buffers, use
 `]s` / `[s` for substeps, `]c` / `[c` for changes, `gx` to collapse/reopen the
-explanation and `q` to close inspection. `:SosExplanations` toggles the explanation
+explanation and `q` to hide the SOS layout. `:SosExplanations` toggles the explanation
 panel; `:SosExplanation` remains an alias.
 Normal motion, search and window commands remain native; focus is not moved on updates.
 Explicit next/previous actions focus the corresponding code location without
 reopening the chat or a selector. During review they also update the question's
 substep/file/hunk context, retaining each substep's draft without sending anything.
-An independent two-line header immediately above the code keeps the counters,
-current substep title and filename visible even with a global statusline:
+A fixed, nonfocusable two-line footer immediately below the code keeps the counters,
+current substep title and filename visible even with a global statusline. Its internal
+scratch display is not an editable or keyboard-navigable inspection pane:
 
 ```text
 Step 2/5 | Substep 1/3 | Diff 2/4 | Store metadata
 src/metadata.py
 ```
 
-Changes follow preserved `hunk_order`. The upper panel is titled only `Explanation`
+Changes follow preserved `hunk_order`. The explanation content occupies three
+scrollable lines by default. The upper panel is titled only `Explanation`
 and contains only the selected hunk's `hunk_explanations`, without repeated titles,
 counters, summaries, indicators or shortcut hints. Older results without hunk text
 show `No explanation available for this change.` Empty substeps without a diff
@@ -524,7 +539,7 @@ unexplained daemon cancellation is not attributed to a permission decision.
 - Frozen composer: inspect the persistent context label. Use `:SosContext` or
   `:SosVersions` to leave a preview/archive; an active implementation keeps its
   parent Discussion frozen until the daemon permits closing it.
-- Proposal or import refusal: read the preserved error, refresh via `:SosSteps`,
+- Proposal or import refusal: read the error in `:messages`, then reopen SOS
   inspect the current evidence and retry explicitly. Resolve original-workspace
   conflicts outside the read-only inspection buffers without discarding user work.
 - Inspection shows preserved code, not a live file. Search/LSP still use your

@@ -116,15 +116,15 @@ vim.cmd('SosSend')
 assert(prompted==2,'Read-only context blocked permission controls')
 require('sos.ui').select=previous_select
 plugin.session,plugin.panel=previous_session,previous_panel
--- Closing the chat must leave an independent construction indicator.
+-- Construction status belongs only to the composer, not the inspection.
 s.options.progress=true
 s:changed()
-assert(not s.progress_view,'Visible workspace retained a competing progress overlay')
 local focus=api.nvim_get_current_win()
+local status=panel.build_surface
+assert(status and api.nvim_win_is_valid(status.float))
 panel:hide()
 require('sos.progress').update(s)
-local status=s.progress_view
-assert(status and api.nvim_win_is_valid(status.window) and api.nvim_get_current_win()==focus)
+assert(not panel.build_surface and not api.nvim_win_is_valid(status.float) and api.nvim_get_current_win()==focus)
 assert(inspector.visible and api.nvim_win_is_valid(inspector.code),'Hiding chat closed the code')
 inspector:hide()
 require('sos.progress').close(s)

@@ -29,9 +29,17 @@ function M:changed()
   require('sos.progress').update(self)
 end
 
-function M:notice(text)
-  self.current.notice = text
-  self:changed()
+function M:notice(text, kind, current)
+  if not text or text=='' then return end
+  current=current or self.current
+  current.notice=text
+  if kind=='permission' then
+    current.permission_notice=text
+    self:changed()
+    return
+  end
+  local line=vim.trim(text:gsub('%s+',' '))
+  vim.api.nvim_echo({{'SOS: '..line,kind=='info' and 'None' or 'ErrorMsg'}},true,{})
 end
 
 function M:request(frame, terminal, callback)
@@ -152,7 +160,6 @@ function M:start() self.workflow:start() end
 function M:retry_plan() self.workflow:auto_retry() end
 function M:implementation_plan() self.workflow:show_plan() end
 function M:generate_plan() self.workflow:generate() end
-function M:steps() self.workflow:steps() end
 function M:human_validation() self.workflow:human_validation() end
 function M:continue() self.workflow:resume() end
 function M:inspection_origin()
@@ -163,7 +170,7 @@ end
 function M:inspect(focus,origin,identity)
   origin=origin or self:inspection_origin()
   if not self.inspector then self.inspector=require('sos.inspection').new(self) end
-  if not self.inspector:can_open(origin) then self:notice('The originating window changed. Run :SosSteps again.'); return end
+  if not self.inspector:can_open(origin) then self:notice('The originating window changed. Reopen SOS to select a step again.'); return end
   if identity then self.workflow:select_step(identity) end
   if self.current.kind~='review' and self.current.kind~='step' and self.workflow.selected_identity then self.workflow:select_step(self.workflow.selected_identity) end
   self.inspector:show(focus~=false,origin)
@@ -271,7 +278,7 @@ function M:send(queued_text)
     return
   end
   history:purge()
-  current.permission_decision,current.notice=nil,nil
+  current.permission_decision,current.notice,current.permission_notice=nil,nil,nil
   current.pending={text=text}
   current.busy=true
   if not queued_text then current.draft='' end
@@ -391,7 +398,6 @@ function M:event(event)
     self.configured, self.switching, self.transfer = false, false, nil
     self.current.busy, self.current.pending = false, nil
     self.waiting, self.permissions, self.permission_prompt = {}, {}, nil
-    self.current.notice = event.error
   elseif event.type == 'mode.updated' or event.type == 'integration.configured' then
     self.current.mode = event.mode or self.current.mode
   elseif event.type == 'session.attach_started' and (self.switching or self.client.recovering) then
@@ -416,14 +422,18 @@ function M:event(event)
   elseif event.type == 'permission.resolved' or event.type == 'permission.dismissed' then
     self.permissions[event.permissionId] = nil
     if self.permission_prompt == event.permissionId then self.permission_prompt = nil end
+    if not next(self.permissions) then self.current.permission_notice=nil end
   elseif event.type == 'execution.cancel_ignored' then
     self.client.operations[event.requestId] = nil
     self.client.transport.pending[event.requestId] = nil
   end
-  if event.error and event.error ~= '' then self.current.notice = event.error end
   if event.type == 'execution.cancelled' then
-    self.current.notice = (event.error or 'Execution cancelled')
-      ..(self.current.permission_decision and ('\n'..self.current.permission_decision) or '')
+    self:notice((event.error or 'Execution cancelled')
+      ..(self.current.permission_decision and ('\n'..self.current.permission_decision) or ''),'info')
+  elseif event.type=='connection.closed' and event.error=='Connection closed by user' then
+    self:notice(event.error,'info')
+  elseif event.type~='request.failed' then
+    self:notice(event.error or (event.type=='execution.failed' and 'Execution failed' or nil))
   end
   if (event.messages or event.type:match('^execution%.')) and (not event.sessionId or event.sessionId == self.current.id) then
     self:history():live(event)

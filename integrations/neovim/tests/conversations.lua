@@ -77,6 +77,8 @@ local mode_id = client.sent[#client.sent].id
 assert(session.current.mode == 'sane')
 client:reply({type='request.failed',requestId=mode_id,error='Mode locked'})
 assert(session.current.mode == 'sane' and session.current.notice == 'Mode locked')
+assert(vim.fn.execute('messages'):find('SOS: Mode locked',1,true))
+assert(not session.current.permission_notice,'A failed command became transcript content')
 session:toggle_mode()
 client:reply({type='mode.updated',requestId=client.sent[#client.sent].id,mode='slop'})
 assert(session.current.mode == 'slop')

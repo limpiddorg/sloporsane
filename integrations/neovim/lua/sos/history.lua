@@ -142,7 +142,7 @@ function M:navigate(direction, done)
   self:request({type='session.history',direction=direction,anchor=anchor or ''},{purpose='page'},function(records,err,header)
     self.loading = false
     if records then self:install(records,header.page)
-    else self.current.notice = 'History unavailable: ' .. tostring(err) end
+    else self.session:notice('History unavailable: ' .. tostring(err),nil,self.current) end
     if not self.page.hasNewer then
       local queued = self.live_queue or {}
       for _, event in ipairs(queued) do self:live(event) end

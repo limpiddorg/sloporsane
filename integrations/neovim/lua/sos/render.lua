@@ -256,7 +256,7 @@ function M.project(current, info, width)
     body(current.queued,'queue:text',0,nil,false,1)
   end
   if history and history.loading then line('Loading history...','history:loading',0) end
-  if current.notice then body('Notice: '..current.notice,'notice',0,'SosNotice') end
+  if current.permission_notice then body(current.permission_notice,'notice',0,'SosNotice') end
   if #result.lines == 0 then line('','empty',0) end
   -- Native folds retain the same offsets and semantic spans as expanded headers.
   for _,span in ipairs(result.spans) do

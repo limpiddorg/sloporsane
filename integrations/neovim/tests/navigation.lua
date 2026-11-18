@@ -46,7 +46,7 @@ local function key(mapping)
 end
 local function counters(fragment)
   local inspect=s.inspector
-  assert(api.nvim_buf_get_lines(inspect.header_buffer,0,1,false)[1]:find(fragment,1,true),
+  assert(api.nvim_buf_get_lines(inspect.header_surface.display,0,1,false)[1]:find(fragment,1,true),
     'Counters disappeared with a global statusline')
 end
 w:steps()
@@ -63,9 +63,9 @@ assert(inspect.model.change==2 and api.nvim_win_get_cursor(inspect.code)[1]==4)
 counters('Diff 2/2')
 assert(table.concat(api.nvim_buf_get_lines(inspect.explanation_buffer,0,-1,false),'\n'):find('Return the stored alpha',1,true))
 key(']s')
-assert(inspect.model.part==2 and api.nvim_buf_get_lines(inspect.header_buffer,1,2,false)[1]=='beta.lua')
+assert(inspect.model.part==2 and api.nvim_buf_get_lines(inspect.header_surface.display,1,2,false)[1]=='beta.lua')
 counters('Substep 3/3'); counters('Diff 1/1')
-assert(api.nvim_buf_get_lines(inspect.header_buffer,0,1,false)[1]:find('Wire behavior 100%',1,true))
+assert(api.nvim_buf_get_lines(inspect.header_surface.display,0,1,false)[1]:find('Wire behavior 100%',1,true))
 key('[s'); assert(inspect.model.part==1 and inspect.model.change==2)
 key('[s'); assert(inspect.model.part==0 and inspect.model.change==0 and inspect.source.kind=='empty')
 counters('Diff 0/0')

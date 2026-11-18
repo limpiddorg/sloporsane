@@ -60,12 +60,23 @@ function M:preview()
   local window=self.popup.preview_window
   local same=self.preview_key==(row or {}).key
   local view=same and api.nvim_win_call(window,vim.fn.winsaveview)
-  local lines=row and row.preview or {'Select a step to preview its substeps.'}
+  self.popup.title=row and row.title or 'Implementation steps'
+  self.popup:layout()
+  local projected=require('sos.markdown').project(table.concat(row and row.preview or {'Select a step to preview its substeps.'},'\n'))
+  local lines={}
+  for _,line in ipairs(projected) do lines[#lines+1]=line.text end
   if not vim.deep_equal(api.nvim_buf_get_lines(buffer,0,-1,false),lines) then
     vim.bo[buffer].modifiable=true
     api.nvim_buf_set_lines(buffer,0,-1,false,lines)
     vim.bo[buffer].modifiable=false
     vim.bo[buffer].readonly=true
+  end
+  api.nvim_buf_clear_namespace(buffer,self.namespace,0,-1)
+  for n,line in ipairs(projected) do
+    if line.group then api.nvim_buf_set_extmark(buffer,self.namespace,n-1,0,{end_col=#line.text,hl_group=line.group}) end
+    for _,mark in ipairs(line.marks) do
+      api.nvim_buf_set_extmark(buffer,self.namespace,n-1,mark.first,{end_col=mark.last,hl_group=mark.group,priority=110})
+    end
   end
   if view then api.nvim_win_call(window,function() vim.fn.winrestview(view) end)
   else

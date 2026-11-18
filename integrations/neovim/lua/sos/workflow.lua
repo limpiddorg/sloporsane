@@ -17,7 +17,7 @@ function M:remember(current)
 end
 
 function M:reset()
-  if self.selector then self.selector:close(); self.selector=nil end
+  self:close_steps()
   self.selected_identity,self.active_started,self.active_key=nil,nil,nil
   self.archive_view,self.archive_key,self.live_state,self.live_selection=nil,nil,nil,nil
   self.attached_id,self.branch_id,self.discussion_id,self.state = nil,nil,nil,nil
@@ -49,13 +49,25 @@ function M:label(current)
   return label
 end
 
+local function step_context(current)
+  return current.kind=='review' or current.kind=='step' or current.kind=='validation'
+end
+
+function M:close_steps()
+  local selector=self.selector
+  self.selector=nil
+  if selector then selector:close() end
+end
+
 function M:select(current)
+  if not step_context(current) then self:close_steps() end
   self:remember(self.session.current)
   self.session.current=current
   self.session:changed()
 end
 
 function M:attached(header)
+  self:close_steps()
   local current = self.session.current
   self:remember(current)
   local previous = self.attached_id
@@ -79,13 +91,13 @@ function M:attached(header)
     local request=self.session:request({type='implementation.state',sessionId=current.id},'implementation.updated',function(event,error)
       if not event then
         current.loading_implementation=nil
-        current.implementation_error=error or 'Implementation state is unavailable. Use :SosSteps to retry.'
+        current.implementation_error=error or 'Implementation state is unavailable. Use :SosReconnect to reload.'
         self.session:changed()
       end
     end)
     if not request then
       current.loading_implementation=nil
-      current.implementation_error='Implementation state is unavailable. Use :SosSteps to retry.'
+      current.implementation_error='Implementation state is unavailable. Use :SosReconnect to reload.'
     end
     if self.archive_view and self.selected_identity then self:select_step(self.selected_identity) end
   end
@@ -193,7 +205,7 @@ end
 function M:review_status(current)
   if current.kind~='review' or not self:readonly(current) then return end
   local state=self.state
-  local second=':SosSteps to select a step to review'
+  local second='Reopen SOS to select a step to review'
   local importing=self.review_actions and self.review_actions.importing
   if importing and importing.identity==current.step_identity then return 'Applying changes\nAwaiting daemon confirmation' end
   if self.archive_view or current.archived then return 'Archived review · Read-only\n'..second end
@@ -456,6 +468,14 @@ function M:progress(construction)
   local step=(state.steps or {})[(state.work_step or 0)+1]
   local title=((state.plan or {}).steps or {})[(state.work_step or 0)+1]
   local prefix='Step '..tostring((state.work_step or 0)+1)..'/'..#state.steps
+  if construction and (state.status=='running' or state.status=='revising') then
+    local total=title and #title.substeps or 0
+    local current=math.min((state.work_substep or 0)+1,total)
+    local validation=step and step.validation or {}
+    local phase=(state.preparing or (step and step.preparing)) and 'Preparing'
+      or (validation.started and not validation.complete) and 'Validating' or 'Building'
+    return prefix..' · Substep '..current..'/'..total..' · '..phase,true
+  end
   if title then prefix=prefix..' · '..title.title end
   if state.status=='running' or state.status=='revising' then
     if state.preparing or (step and step.preparing) then return prefix..' · Preparing',true end
@@ -571,11 +591,11 @@ function M:step_rows(origin)
     for part,definition in ipairs(plan.substeps) do
       local result=item.substeps[part] or {}
       local explanation=result.unnecessary and 'No longer necessary given the changes in previous steps.' or result.explanation
-      preview[#preview+1]=part..'. '..(type(definition)=='table' and definition.title or definition)
+      preview[#preview+1]='## '..part..'. '..(type(definition)=='table' and definition.title or definition)
       preview[#preview+1]=explanation and explanation:match('%S') and explanation or 'No explanation available for this substep.'
       preview[#preview+1]=''
     end
-    rows[#rows+1]={key=identity,label=n..'. '..plan.title..' · '..self:step_label(n-1),group=group,
+    rows[#rows+1]={key=identity,title=plan.title,label=n..'. '..plan.title..' · '..self:step_label(n-1),group=group,
       preview=vim.split(table.concat(preview,'\n'),'\n',{plain=true}),
       choose=function()
         self.session:inspect(true,origin,identity)
@@ -584,12 +604,22 @@ function M:step_rows(origin)
   return rows
 end
 
-function M:steps()
+function M:steps(automatic)
+  local origin
+  if automatic then
+    local panel=self.session.panel
+    if not self.branch_id or not self.state or not self.state.plan or self:finished()
+      or not step_context(self.session.current) then return end
+    local win=panel and (panel.input or panel.transcript)
+    if not win or not vim.api.nvim_win_is_valid(win) then return end
+    origin={window=win,buffer=vim.api.nvim_win_get_buf(win),from_chat=true,
+      insert=vim.api.nvim_get_current_win()==win and vim.api.nvim_get_mode().mode:sub(1,1)=='i'}
+  end
   if not self.branch_id then self.session:notice('Open an implementation first'); return end
   if self.selector and self.selector:visible() then vim.api.nvim_set_current_win(self.selector.window); return end
-  local origin=self.session:inspection_origin()
+  origin=origin or self.session:inspection_origin()
   self.selector=require('sos.selector').open('Implementation steps',self:step_rows(origin),self.selected_identity,origin)
-  self:command('implementation.state')
+  if not automatic then self:command('implementation.state') end
 end
 
 function M:sync_navigation()
@@ -642,7 +672,7 @@ function M:review_event(event)
         local current=self.contexts[transfer.key] or {id=self.branch_id,context_key=transfer.key,kind='revision',mode='sane',draft='',workspace=self.info.workspace}
         current.records=records; current.busy=transfer.branch.status=='running'
         self.contexts[transfer.key]=current
-        if transfer.branch.error then current.notice=transfer.branch.error end
+        self.session:notice(transfer.branch.error,nil,current)
         return true
       end
       if transfer.key==self:review_key(transfer.branch.review_step) then
@@ -651,7 +681,7 @@ function M:review_event(event)
         for _, current in pairs(self.contexts) do
           if current.review_key==transfer.key and not current.archived then
             current.records,current.busy=saved.records,saved.busy
-            if transfer.branch.error then current.notice=transfer.branch.error end
+            self.session:notice(transfer.branch.error,nil,current)
           end
         end
       end
@@ -692,7 +722,7 @@ function M:event(event)
     local principal=self.contexts[self.branch_id]
     local opening=principal and principal.loading_implementation
     if principal then principal.loading_implementation,principal.implementation_error=nil,nil end
-    if opening and not self.state then principal.implementation_error='Implementation state is unavailable. Use :SosSteps to retry.' end
+    if opening and not self.state then principal.implementation_error='Implementation state is unavailable. Use :SosReconnect to reload.' end
     self:observe_execution()
     if self.state then
       local selected=false
@@ -702,7 +732,8 @@ function M:event(event)
         self.selected_identity=(self.state.steps[(index or 0)+1] or {}).identity
       end
       local kind=self.session.current.kind
-      if (initial or opening) and (kind=='planning' or kind=='plan') and self.selected_identity then self:select_step(self.selected_identity,true) end
+      local entering=(initial or opening) and (kind=='planning' or kind=='plan') and self.selected_identity
+      if entering then self:select_step(self.selected_identity,true) end
       local target=self.after_import
       self.after_import=nil
       if target and self.state.steps[target+1] then
@@ -729,20 +760,21 @@ function M:event(event)
       end
       if current.kind=='review' and current.review_key~=self:review_key(current.step) then
         current.question_context=nil
-        current.notice='This review belongs to a superseded result. Select the corrected step and use :SosReview. Your draft is retained.'
+        self.session:notice('This review belongs to a superseded result. Select the corrected step and use :SosReview. Your draft is retained.','info',current)
       end
       if current.kind=='step' or current.kind=='validation' then
         for n,item in ipairs(self.state.steps) do
           if item.identity==self.selected_identity then current.step=n-1; self:step_summary(current,n-1); break end
         end
       end
+      if entering and not self.state.revision_planning then self:steps(true) end
     end
     self:sync_navigation()
     if self.state and self.state.revision_planning and (initial or not previous.revision_planning)
       and self.session.current.kind~='revision' then
       self.session:review_actions():revision()
     elseif self.state and type(self.state.proposed_rework)=='string' and self.state.proposed_rework~='' then
-      self.session.current.notice='Correction proposal available · :SosProposal'
+      self.session:notice('Correction proposal available · :SosProposal','info')
       if self.session.current.kind=='review' and (not previous or previous.proposed_rework~=self.state.proposed_rework) then
         self.session.current.focus_control='accept_proposal'
       end
